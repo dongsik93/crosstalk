@@ -4,7 +4,7 @@ allowed-tools: Bash, AskUserQuestion, Read
 argument-hint: (인자 없음)
 ---
 
-# Crosstalk Install — Setup Automation (v0.1.4)
+# Crosstalk Install — Setup Automation (v0.1.5)
 
 마켓에서 플러그인 설치 직후 한 번 실행. 다음을 수행:
 
@@ -18,7 +18,7 @@ argument-hint: (인자 없음)
    - `~/.claude/crosstalk/config.json` (active 프리셋 추적)
 5. 인증 안내 (gh / 각 CLI 첫 실행 시 OAuth)
 
-## v0.1.4 범위
+## v0.1.5 범위
 
 - ✅ Claude Code 측 컴포넌트 자동 설치
 - ✅ AI CLI npm 자동 설치 (claude/codex/gemini)
@@ -265,7 +265,7 @@ done
 ## 6단계: 완료 안내 + 다음 단계
 
 ```
-✅ Crosstalk v0.1.4 installed!
+✅ Crosstalk v0.1.5 installed!
 
 설치된 항목:
   - ~/.claude/scripts/crosstalk_bridge.sh

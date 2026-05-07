@@ -1,7 +1,7 @@
 # Crosstalk
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.1.4-blue)
+![Version](https://img.shields.io/badge/version-0.1.5-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-black)
 

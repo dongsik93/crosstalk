@@ -394,7 +394,7 @@ case "$CMD" in
 {
   "run_id": "$RID",
   "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "version": "0.1.4"
+  "version": "0.1.5"
 }
 EOF
     echo "$RID"
