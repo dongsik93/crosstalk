@@ -1,12 +1,12 @@
 # Debate Rules (default)
 
 ## 1. Response Format
-- One paragraph, 3-5 sentences.
+- Follow your natural reasoning. Short when short fits, longer when depth helps.
 - Text opinion only. Use short code blocks only when they materially improve clarity.
-- State your conclusion in the final sentence.
+- State your conclusion clearly.
 
 ## 2. Constraints
-- Do not modify files, run shell commands, or call external APIs.
+- Do not modify files, run shell commands, or call external APIs (except the single ping/transport line the moderator specifies).
 - No personal attacks.
 - Do not repeat the same claim. If there is no new evidence, concede and end with [AGREE].
 

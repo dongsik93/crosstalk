@@ -1,11 +1,11 @@
 # Debate Rules (debate)
 
 ## 1. Response Format
-- One paragraph, 5-8 sentences.
+- Go as deep as the logic needs. Long or short are both fine.
 - Prefer premise, evidence, tradeoff, conclusion.
 
 ## 2. Constraints
-- Do not modify files, run shell commands, or call external APIs.
+- Do not modify files, run shell commands, or call external APIs (except the single ping/transport line the moderator specifies).
 - Do not agree without adding at least one validating or challenging angle.
 - Avoid empty agreement.
 

@@ -152,11 +152,25 @@ Read 도구로 두 파일 본문 메모리에 로드. 이후 모든 토론 메�
 <룰 본문 그대로>
 
 ═══ 안전 규칙 (변경 불가) ═══
-1. 답변은 한 단락 텍스트만.
-2. WriteFile/Shell/외부 API 같은 도구 사용 금지. 화면에 답변 텍스트만.
+1. 답변은 자연스러운 텍스트로. 길이/형식은 룰 섹션을 따른다.
+2. 도구 사용 금지 (WriteFile/외부 API 등). 단 *답변 끝났음*을 알리는 ping 한 줄은 예외.
 3. 합의 시 [AGREE], 이견 시 [DISAGREE: 사유].
 4. 사회자(Claude)가 매 라운드 짧은 메시지로 차례를 넘긴다 — 그 메시지에만 답해라.
 5. 이 preamble에는 답하지 마라. 다음 메시지를 기다려라.
+
+═══ Ping 프로토콜 (변경 불가) ═══
+너는 `<AGENT>` (claude/codex/gemini 중 하나) pane이다.
+
+매 라운드 답변을 *마치는 순간* 다음 한 줄을 셸에서 실행해라 (이게 사회자에게 보내는 "끝났어" 신호다):
+
+  touch /tmp/crosstalk/run-<RUN_ID>/done/<AGENT>-r<NN>
+
+  - <AGENT>: 너의 종류 (codex / gemini / claude)
+  - <NN>: 사회자가 메시지에 적은 라운드 번호. r01 → 1, r02 → 2 ...
+
+예: `touch /tmp/crosstalk/run-${RUN_ID}/done/codex-r01`
+
+이 touch 명령 외에는 도구 호출 금지. 답변 본문 자체는 그냥 화면에 텍스트로 출력하면 된다.
 ```
 
 `LANGUAGE=en`이면 영어, `LANGUAGE=ko`이면 한국어. 다음은 fallback 안내용 짧은 버전 (실제 본문은 위 형태로 페르소나/룰을 주입해 보낸다):
@@ -218,15 +232,15 @@ LOG_TMP="/tmp/crosstalk-$(date +%Y%m%d-%H%M%S)-$$.md"
 - 모드: 1:1(vs <CLI>) 또는 다자
 "
 
-# `--transport off` 면 run 디렉토리 안 만든다 (필요 없음).
-if [ "$TRANSPORT_OPTION" != "off" ]; then
-  RUN_ID=$(~/.claude/scripts/crosstalk_bridge.sh start-run)
-  RUN_DIR="/tmp/crosstalk/run-${RUN_ID}"
-  echo "📁 transport run: $RUN_DIR"
-fi
+# RUN_ID는 모드 무관 항상 만든다 — off 모드에서도 ping 파일을 위해 필요.
+RUN_ID=$(~/.claude/scripts/crosstalk_bridge.sh start-run)
+RUN_DIR="/tmp/crosstalk/run-${RUN_ID}"
+echo "📁 run dir: $RUN_DIR"
 ```
 
-`TRANSPORT_OPTION=off` (기본)이면 답변은 화면 캡처. `file`/`screen`이면 `$RUN_DIR/responses/<agent>-r<NN>-a<N>.md`.
+용도:
+- `TRANSPORT_OPTION=off` (기본): 답변은 화면 캡처. ping 파일만 `$RUN_DIR/done/<agent>-r<NN>` 사용.
+- `file`/`screen`: 답변 본문이 `$RUN_DIR/responses/<agent>-r<NN>-a<N>.md`.
 
 ## 5단계: 토론 실행 — 핑-퐁 패턴
 
@@ -239,7 +253,8 @@ fi
 ```
 [Round 1] 주제: <주제>
 
-너의 의견을 한 단락(3-5문장)으로. 합의 가능하면 [AGREE], 이견이면 [DISAGREE: 사유]로 끝.
+너의 의견은? 합의 가능하면 [AGREE], 이견이면 [DISAGREE: 사유]로 끝.
+답변 끝나면 preamble의 ping 프로토콜대로 touch 한 줄 실행 (codex이면 `touch /tmp/crosstalk/run-${RUN_ID}/done/codex-r01`).
 ```
 
 (`TRANSPORT_OPTION=file` 또는 `screen`이면 메시지 끝에 ═══ Transport ═══ 섹션을 옵션값에 맞춰 추가. `off`면 안 넣음.)
@@ -253,7 +268,7 @@ fi
 [Round 3] codex가 직전에 이렇게 말했어:
 "파전이 더 적합 — 습한 날 뜨거운 국물은 부담."
 
-너 입장은? 한 단락으로.
+너 입장은? (답변 끝나면 `touch /tmp/crosstalk/run-${RUN_ID}/done/gemini-r03`)
 ```
 
 다자 예:
@@ -262,10 +277,11 @@ fi
 - Codex: 파전 (습도 부담 근거)
 - Gemini: 국밥 (정서적 위로 근거)
 
-너 차례. 어느 쪽에 동의/반박할지 한 단락.
+너 차례. 어느 쪽에 동의/반박? (답변 끝나면 `touch /tmp/crosstalk/run-${RUN_ID}/done/<너>-r02`)
 ```
 
-> 메시지 길이 가이드: **first-turn 200자 이내, follow-up 300자 이내**. 페르소나/룰 다시 박지 마라.
+> 메시지 길이 가이드: **사회자가 보내는 메시지를 짧게**. 페르소나/룰 다시 박지 마라.
+> AI 답변 길이는 강제하지 않는다 — 룰의 "자연스러운 사고 흐름" 가이드 따름.
 > 사회자(Claude)가 *직전 답변 한 줄 요약*만 메시지에 붙인다. 전체 히스토리 X.
 
 > `TRANSPORT_OPTION=off` (기본)이면 이 메시지에 **═══ Transport ═══ 섹션을 넣지 않는다**.
@@ -319,19 +335,29 @@ case "$AGENT" in
 esac
 
 if [ "$TRANSPORT_OPTION" = "off" ]; then
-  # ───── 기본 흐름: 화면 캡처. 사회자가 직접 읽는다. ─────
-  # 보내기 전에 현재 화면 라인 수 기록 → 답변 후 새로 추가된 줄만 추출
+  # ───── 기본 흐름: 화면 캡처 + ping 파일 ─────
+  # 답변 본문은 화면에 그대로 두고, 완료 신호는 AI가 touch한 ping 파일로 받는다.
+  # → 진짜 이벤트 기반. 화면 안정성 휴리스틱 의존도 ↓.
   PREV_LINES=$(~/.claude/scripts/crosstalk_bridge.sh lines "$peer")
 
-  ~/.claude/scripts/crosstalk_bridge.sh send "$peer" "<메시지>"
+  ~/.claude/scripts/crosstalk_bridge.sh send "$peer" "<메시지 (Transport 섹션 없음, ping 안내는 preamble에서 이미 줌)>"
 
-  # 화면이 안정될 때까지 대기 (legacy wait — 활동 감지 + 안정 시점)
-  STABLE_SECONDS=5 MAX_WAIT="$AGENT_MAX_WAIT" \
-    ~/.claude/scripts/crosstalk_bridge.sh wait "$peer" "$PREV_LINES" 2>/dev/null \
-    > /tmp/crosstalk_resp_raw
+  # ping 파일 도착까지 polling (1초 간격, 활동 감지로 자동 연장)
+  WAIT_PING_SURFACE="$peer" \
+  MAX_WAIT="$AGENT_MAX_WAIT" \
+  ACTIVITY_GRACE=30 ACTIVITY_EXTEND_BY=60 ACTIVITY_EXTEND_MAX=3 \
+    ~/.claude/scripts/crosstalk_bridge.sh wait-ping "$RUN_ID" "$AGENT" "$ROUND" 2> /tmp/crosstalk_state
+  PING_RC=$?
 
-  # raw 화면 텍스트 → 사회자(Claude)가 본문만 추출. CLI 박스, 진행 표시(✦/⏵), 푸터, 사용자 프롬프트 라인 등을 무시하고 답변 단락만 정리.
-  # (Claude 본인이 LLM이므로 후처리 잘 함. 별도 마커 불필요.)
+  # ping 받았으면 화면에서 PREV_LINES 이후 새 텍스트만 추출 → 사회자(Claude)가 본문만 정리.
+  if [ "$PING_RC" -eq 0 ]; then
+    ~/.claude/scripts/crosstalk_bridge.sh capture "$peer" \
+      | tail -n +"$((PREV_LINES + 1))" > /tmp/crosstalk_resp_raw
+  else
+    # timeout — 사용자에게 *기다리기 / 무시(부분 진행) / 중단* AskUserQuestion
+    :
+  fi
+  # raw 화면 텍스트 → Claude가 CLI 박스, 진행 표시(✦/⏵), 푸터 등 노이즈 무시하고 답변 단락만 정리.
 else
   # ───── 옵션 흐름: file / screen transport ─────
   ATTEMPT=1
@@ -362,7 +388,11 @@ MAX_RESPONSE_BYTES=20000 \
 
 ### 상태별 처리
 
-**`TRANSPORT_OPTION=off` (기본)**: state 없음. 화면 캡처 후 사회자가 후처리. 답변이 비었거나 노이즈만 있으면 사회자가 *답변 누락 / 재요청* 결정.
+**`TRANSPORT_OPTION=off` (기본)**:
+- `wait-ping` 종료 코드 0 → ping 받음. 화면 캡처 후 사회자가 본문 정리.
+- 종료 코드 1 → `STATE: timeout ...` (preamble에서 ping 안내했는데 AI가 안 함 / 답변 자체가 늦음).
+  사용자에게 *기다리기 / 다음 차례로 무시 / 중단* `AskUserQuestion`.
+- INTERVENTION 휴리스틱은 사용 안 함. ping이 와있으면 끼어들었어도 신뢰.
 
 **`file`/`screen` 옵션**: 아래 표 적용.
 
@@ -493,7 +523,7 @@ bridge에 정지 신호 + 즉시 8단계 종합으로 점프 → 9단계 보관 
 
 ## 주의사항
 
-- 한 발언당 한 단락(3-5문장) 엄수.
+- 답변 길이는 룰 프리셋 가이드에 맡긴다. 강제 X — 자연스러운 사고 흐름 우선.
 - 같은 논점 반복 금지. 새 근거/관점 없으면 양보 + [AGREE].
 - v0.1.4부터 답변은 **파일 기반 transport**로 받는다. 화면 캡처 폴백은 사용하지 않는다.
 - bridge 호출 실패(소켓 단절 등) 즉시 사용자에게 보고 + 종료.

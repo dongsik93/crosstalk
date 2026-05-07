@@ -90,7 +90,7 @@ Crosstalk status
 
 [사용 가능한 룰]
   ✅ ${ACTIVE_RULES} (현재)
-  - default     — 한 단락 3-5문장, 안전 모드, 건전 토론
+  - default     — 자연스러운 흐름, 안전 모드, 건전 토론
   - brainstorm  — 짧고 빠르게, 합의 우선, Yes-and
   - debate      — 깊이있게, 데빌즈 어드보킷, 합의 신중
   - <사용자 커스텀들>

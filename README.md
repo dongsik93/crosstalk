@@ -1,7 +1,7 @@
 # Crosstalk
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.1.7-blue)
+![Version](https://img.shields.io/badge/version-0.1.8-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-black)
 
@@ -168,7 +168,7 @@ Built-in rule presets:
 
 | Rule | Style |
 | --- | --- |
-| `default` | concise, balanced, 3-5 sentence responses |
+| `default` | natural reasoning flow, balanced, constructive |
 | `brainstorm` | short, exploratory, yes-and style |
 | `debate` | deeper critique, slower agreement |
 

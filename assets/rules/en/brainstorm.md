@@ -1,11 +1,11 @@
 # Debate Rules (brainstorm)
 
 ## 1. Response Format
-- One short paragraph, 2-4 sentences.
+- Short and fast. A sentence or two is fine.
 - Prioritize new ideas and useful angles.
 
 ## 2. Constraints
-- Do not modify files, run shell commands, or call external APIs.
+- Do not modify files, run shell commands, or call external APIs (except the single ping/transport line the moderator specifies).
 - Avoid purely negative replies. Turn "yes, but" into "yes, and".
 
 ## 3. Tone

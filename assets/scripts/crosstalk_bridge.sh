@@ -36,6 +36,12 @@
 #                                                  마켓플레이스 캐시에서 빌트인 프리셋을 자동 복사 (자가치유).
 #                                                  이미 있는 파일은 보존. <lang>: en|ko
 #                                                  stdout: 'OK' (정상) | 'SKIPPED reason=...' (마켓 캐시 못 찾음)
+#   crosstalk_bridge.sh wait-ping <run-id> <agent> <round>
+#                                                  → AI가 "답변 끝났음" 신호로 touch한 ping 파일을 기다린다.
+#                                                  ping 경로: /tmp/crosstalk/run-<id>/done/<agent>-r<NN>
+#                                                  발견 시 즉시 exit 0. MAX_WAIT 초과 시 exit 1 (timeout).
+#                                                  화면/파일 활동 감지 + ACTIVITY_GRACE 자동 연장은 wait-turn과 동일.
+#                                                  env: MAX_WAIT, ACTIVITY_GRACE, ACTIVITY_EXTEND_BY, ACTIVITY_EXTEND_MAX
 #
 # v0.1.4 file-based transport:
 #   crosstalk_bridge.sh start-run                       → 새 run-id 생성, /tmp/crosstalk/run-<id>/ 디렉토리 + manifest.json 생성
@@ -459,12 +465,12 @@ case "$CMD" in
     }
     BASENAME=$(basename "$RUN_DIR")     # run-XXXXXXXX
     RID="${BASENAME#run-}"              # XXXXXXXX
-    mkdir -p "$RUN_DIR/responses"
+    mkdir -p "$RUN_DIR/responses" "$RUN_DIR/done"
     cat > "$RUN_DIR/manifest.json" <<EOF
 {
   "run_id": "$RID",
   "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "version": "0.1.7"
+  "version": "0.1.8"
 }
 EOF
     echo "$RID"
@@ -677,6 +683,80 @@ EOF
     exit 1
     ;;
 
+  wait-ping)
+    # AI가 "답변 끝났음" 신호로 touch한 ping 파일을 기다린다.
+    # transport=off 흐름에서 사용 — 답변 본문은 화면에 그대로 두고, 완료 신호만 파일로 받는다.
+    # ping 경로: $CROSSTALK_ROOT/run-<id>/done/<agent>-r<NN>
+    RUN_ID="${1:?run-id required}"
+    AGENT="${2:?agent required (claude/codex/gemini)}"
+    ROUND="${3:?round required}"
+    validate_run_id "$RUN_ID" || exit 1
+    validate_agent "$AGENT" || exit 1
+    validate_positive_int "$ROUND" "round" || exit 1
+
+    CROSSTALK_ROOT="${CROSSTALK_ROOT:-/tmp/crosstalk}"
+    RUN_DIR="$CROSSTALK_ROOT/run-$RUN_ID"
+    if [ ! -d "$RUN_DIR/done" ]; then
+      echo "ERROR: run dir not found: $RUN_DIR (call start-run first)" >&2
+      exit 1
+    fi
+
+    PING_FILE="$RUN_DIR/done/$(printf '%s-r%02d' "$AGENT" "$ROUND")"
+    MAX_WAIT="${MAX_WAIT:-300}"
+    ACTIVITY_GRACE="${ACTIVITY_GRACE:-30}"
+    ACTIVITY_EXTEND_BY="${ACTIVITY_EXTEND_BY:-60}"
+    ACTIVITY_EXTEND_MAX="${ACTIVITY_EXTEND_MAX:-3}"
+    validate_positive_int "$MAX_WAIT" "MAX_WAIT" || exit 1
+    validate_nonnegative_int "$ACTIVITY_GRACE" "ACTIVITY_GRACE" || exit 1
+    validate_nonnegative_int "$ACTIVITY_EXTEND_BY" "ACTIVITY_EXTEND_BY" || exit 1
+    validate_nonnegative_int "$ACTIVITY_EXTEND_MAX" "ACTIVITY_EXTEND_MAX" || exit 1
+
+    # surface 옵션: 활동 감지에 화면 변화도 보고 싶으면 SURFACE 환경변수로 전달.
+    # 없으면 ping 파일만으로 판단.
+    SURFACE_OPT="${WAIT_PING_SURFACE:-}"
+
+    PREV_SCREEN_HASH=""
+    LAST_ACTIVITY=0
+    EFFECTIVE_MAX="$MAX_WAIT"
+    EXTENSIONS_USED=0
+    ELAPSED=0
+
+    while [ "$ELAPSED" -lt "$EFFECTIVE_MAX" ]; do
+      # ping 파일 즉시 검사 (paste-bracket race도 방지하기 위해 sleep 전에 한 번)
+      if [ -e "$PING_FILE" ]; then
+        echo "STATE: ping-received agent=$AGENT round=$ROUND" >&2
+        exit 0
+      fi
+      sleep 1
+      ELAPSED=$((ELAPSED + 1))
+
+      # 활동 감지 (있을 때만)
+      if [ -n "$SURFACE_OPT" ]; then
+        SCREEN=$(cmux read-screen --surface "$SURFACE_OPT" --scrollback --lines 1000 2>/dev/null || echo "")
+        CUR_HASH=$(printf '%s' "$SCREEN" | wc -c | tr -d ' ')
+        if [ "$CUR_HASH" != "$PREV_SCREEN_HASH" ]; then
+          LAST_ACTIVITY=$ELAPSED
+        fi
+        PREV_SCREEN_HASH="$CUR_HASH"
+      fi
+
+      # MAX_WAIT 도달 직전에 활동 살아있으면 extension
+      if [ "$((EFFECTIVE_MAX - ELAPSED))" -le 2 ] && \
+         [ "$ACTIVITY_GRACE" -gt 0 ] && \
+         [ "$ACTIVITY_EXTEND_BY" -gt 0 ] && \
+         [ "$EXTENSIONS_USED" -lt "$ACTIVITY_EXTEND_MAX" ] && \
+         [ -n "$SURFACE_OPT" ] && \
+         [ "$((ELAPSED - LAST_ACTIVITY))" -lt "$ACTIVITY_GRACE" ]; then
+        EFFECTIVE_MAX=$((EFFECTIVE_MAX + ACTIVITY_EXTEND_BY))
+        EXTENSIONS_USED=$((EXTENSIONS_USED + 1))
+        echo "INFO: activity detected near deadline, extending wait by ${ACTIVITY_EXTEND_BY}s (#${EXTENSIONS_USED}/${ACTIVITY_EXTEND_MAX}, total=${EFFECTIVE_MAX}s)" >&2
+      fi
+    done
+
+    echo "STATE: timeout agent=$AGENT round=$ROUND reason=no_ping_after_${EFFECTIVE_MAX}s ext=${EXTENSIONS_USED}" >&2
+    exit 1
+    ;;
+
   read-response)
     # 응답 파일을 stdout에 출력. 원문 파일은 절대 수정하지 않음.
     # MAX_RESPONSE_BYTES 초과 시 stdout만 잘라서 출력 + stderr에 WARN.
@@ -714,7 +794,7 @@ EOF
     ;;
 
   *)
-    echo "Usage: $0 {peer|detect|list-peers|list-all|label|get-label|send|wait|capture|lines|prompt-count|save|stop|get-language|ensure-presets|wait-ready|start-run|make-msg-id|wait-turn|read-response} [args...]" >&2
+    echo "Usage: $0 {peer|detect|list-peers|list-all|label|get-label|send|wait|capture|lines|prompt-count|save|stop|get-language|ensure-presets|wait-ready|start-run|make-msg-id|wait-turn|wait-ping|read-response} [args...]" >&2
     exit 2
     ;;
 esac
