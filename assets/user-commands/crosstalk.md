@@ -17,20 +17,25 @@ argument-hint: <토론 주제>
 🗣️ Crosstalk — 다중 AI 토론
 
 기본 사용:
-  /crosstalk <주제>           이 단축 명령 (debate 자동)
-  /crosstalk:debate <주제>    명시적 일반 토론
-  /crosstalk:d <주제>         debate 짧은 별칭
+  /crosstalk <주제>                 이 단축 명령 (debate 자동)
+  /crosstalk:debate <주제>          명시적 일반 토론
+  /crosstalk:debate --rules brainstorm <주제>      룰 일회성
+  /crosstalk:debate --persona senior-junior <주제> 페르소나 일회성
 
 PR 리뷰:
-  /crosstalk:review [PR번호]  PR 리뷰 토론 (빠른 모드)
-  /crosstalk:review --deep    PR 리뷰 토론 (깊은 모드)
-  /crosstalk:r                review 별칭
+  /crosstalk:review [PR번호]        PR 리뷰 토론 (빠른 모드)
+  /crosstalk:review --deep [PR번호] PR 리뷰 토론 (깊은 모드)
+
+토론 룰/페르소나:
+  /crosstalk:status                 현재 active 셋업 + 사용 가능 목록
+  /crosstalk:rules                  룰 전환/생성/편집
+  /crosstalk:persona                페르소나 전환/생성/편집
 
 환경:
-  /crosstalk:setup            cmux 라벨링
-  /crosstalk:launch           cmux 자동 실행 + 셋업
-  /crosstalk:install          최초 컴포넌트 설치
-  /crosstalk:uninstall        컴포넌트 제거
+  /crosstalk:setup                  cmux 라벨링
+  /crosstalk:launch                 cmux 자동 실행 + 셋업
+  /crosstalk:install                최초 컴포넌트 설치
+  /crosstalk:uninstall              컴포넌트 제거
 
 자세한 안내는 https://github.com/dongsik93/crosstalk 참고.
 ```

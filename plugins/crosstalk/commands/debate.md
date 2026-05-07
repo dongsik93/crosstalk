@@ -1,7 +1,7 @@
 ---
-description: cmux의 다른 AI pane(Codex/Gemini)들과 자동 토론. 1:1 또는 다자(Claude 사회자) 모드. 한쪽이 [AGREE] 표시 또는 15턴까지.
-allowed-tools: Bash, AskUserQuestion
-argument-hint: <토론 주제>
+description: cmux의 다른 AI pane(Codex/Gemini)들과 자동 토론. 1:1 또는 다자(Claude 사회자) 모드. 한쪽이 [AGREE] 표시 또는 15턴까지. --rules / --persona 옵션 지원.
+allowed-tools: Bash, AskUserQuestion, Read
+argument-hint: [--rules <name>] [--persona <name>] <토론 주제>
 ---
 
 # Crosstalk — 다중 AI 토론 (Claude 사회자)
@@ -9,12 +9,46 @@ argument-hint: <토론 주제>
 cmux 안에서 분할된 다른 AI CLI(Codex/Gemini)들과 자동으로 토론을 진행한다.
 **이 명령을 호출한 본인(Claude)이 사회자**가 된다.
 
+## 옵션
+
+- `--rules <name>` — 일회성 룰 프리셋 명시 (예: `brainstorm`, `debate`, `default`)
+- `--persona <name>` — 일회성 페르소나 프리셋 명시 (예: `senior-junior`, `critic-builder`)
+- 옵션 없으면 `~/.claude/crosstalk/config.json`의 active 프리셋 사용
+
+룰/페르소나 관리는 `/crosstalk:rules`, `/crosstalk:persona`, `/crosstalk:status` 참고.
+
 ## 전제 조건
 
 - cmux 환경에서 실행 중
 - 본인 외에 cmux split 안에 다른 AI CLI(Codex/Gemini) 1개 이상 떠있음
 - bridge 스크립트가 설치되어 있음: `~/.claude/scripts/crosstalk_bridge.sh`
   - 미설치 시 `/crosstalk:install` 먼저 실행 안내
+
+## 0단계: 옵션 파싱 + 룰/페르소나 로드
+
+`$ARGUMENTS`에서 옵션 추출:
+- `--rules <name>` (있으면) → `RULES_NAME=<name>`
+- `--persona <name>` (있으면) → `PERSONA_NAME=<name>`
+- 나머지 텍스트 = 토론 주제
+
+옵션 없으면 active 프리셋 로드:
+```bash
+CONFIG=~/.claude/crosstalk/config.json
+ACTIVE_RULES=$(jq -r '.active_rules // "default"' "$CONFIG" 2>/dev/null || echo "default")
+ACTIVE_PERSONA=$(jq -r '.active_persona // "default"' "$CONFIG" 2>/dev/null || echo "default")
+RULES_NAME="${RULES_NAME:-$ACTIVE_RULES}"
+PERSONA_NAME="${PERSONA_NAME:-$ACTIVE_PERSONA}"
+```
+
+룰/페르소나 본문 Read:
+```bash
+RULES_PATH=~/.claude/crosstalk/rules/${RULES_NAME}.md
+PERSONA_PATH=~/.claude/crosstalk/personas/${PERSONA_NAME}.md
+[ ! -f "$RULES_PATH" ] && echo "❌ 룰 '$RULES_NAME' 없음 — /crosstalk:rules 확인" && exit 1
+[ ! -f "$PERSONA_PATH" ] && echo "❌ 페르소나 '$PERSONA_NAME' 없음 — /crosstalk:persona 확인" && exit 1
+```
+
+Read 도구로 두 파일 본문 메모리에 로드. 이후 모든 토론 메시지에 주입.
 
 ## 1단계: 환경 스캔
 
@@ -84,12 +118,27 @@ LOG_TMP="/tmp/crosstalk-$(date +%Y%m%d-%H%M%S)-$$.md"
 
 ### 모드 A: 1:1
 
-매 턴마다 self-contained 메시지:
+매 턴마다 self-contained 메시지. **사용자 룰 + 페르소나 + 시스템 룰** 모두 주입:
 
 ```
 [Claude vs <CLI> 토론 - 턴 N/15]
 
 주제: <주제>
+
+═══ 페르소나 (${PERSONA_NAME}) ═══
+<페르소나 파일에서 *너의 역할 매핑*만 추출해서 주입>
+- 사회자(호출자) → moderator 섹션
+- 첫 참여자 → 페르소나 파일의 두 번째 역할
+- 두 번째 참여자 → 페르소나 파일의 세 번째 역할
+- 페르소나가 default면 *각자 본연의 시각으로 토론* 한 줄만
+
+═══ 토론 규칙 (${RULES_NAME}) ═══
+<룰 파일 본문 그대로>
+
+═══ 시스템 규칙 (변경 불가) ═══
+- 합의 시 답변 끝에 [AGREE]
+- 이견 시 답변 끝에 [DISAGREE: 사유]
+- 위 사용자 규칙과 충돌 시 시스템 규칙 우선
 
 [지금까지의 논의 요약]
 - 턴 1 Claude: <한 줄>
@@ -97,12 +146,7 @@ LOG_TMP="/tmp/crosstalk-$(date +%Y%m%d-%H%M%S)-$$.md"
 - ...
 
 [Claude 의 이번 턴 의견]
-<한 단락 3-5문장>
-
-[너의 답변 형식]
-- 한 단락(3-5문장)
-- 합의 시 답변 끝에 [AGREE]
-- 이견이면 [AGREE] 없이 반박/보완
+<한 단락, 룰의 답변 형식 준수>
 ```
 
 전송 흐름:
@@ -123,7 +167,7 @@ STABLE_SECONDS=5 MAX_WAIT=180 \
 
 ### 모드 B: 다자 (Claude 사회자)
 
-각 참여자에게 동일 self-contained 메시지 전송:
+각 참여자에게 동일 self-contained 메시지 전송. **사용자 룰 + 페르소나 + 시스템 룰** 주입:
 
 ```
 [다자 토론 라운드 N/10]
@@ -131,15 +175,20 @@ STABLE_SECONDS=5 MAX_WAIT=180 \
 주제: <주제>
 참여자: Claude(사회자), <발견된 다른 CLI들>
 
+═══ 페르소나 (${PERSONA_NAME}) ═══
+<페르소나 파일에서 각 참여자에 매핑된 역할 추출해서 주입>
+
+═══ 토론 규칙 (${RULES_NAME}) ═══
+<룰 파일 본문 그대로>
+
+═══ 시스템 규칙 (변경 불가) ═══
+- 합의 시 [AGREE], 이견 시 [DISAGREE: 사유]
+
 [직전 라운드 답변 요약]
 - Claude / 각 CLI: <한 줄씩>
 
 [이번 라운드 질문]
 <Claude가 종합한 다음 논점>
-
-[너의 답변 형식]
-- 한 단락(3-5문장)
-- [AGREE] 또는 [DISAGREE: 사유]
 ```
 
 각 참여자에게 보낼 때마다 1:1과 동일한 흐름 (lines/prompt-count → send → wait, INTERVENTION 처리).

@@ -2,7 +2,7 @@
 
 > 한 명령으로 Claude · Codex · Gemini를 동시에 토론시키는 Claude Code 플러그인
 
-<!-- 데모 영상 추후 추가 예정 (docs/demo.gif) -->
+![Demo](docs/demo.gif)
 
 > 한 줄로 셋이 토론하고 종합 의견까지.
 
@@ -85,14 +85,28 @@ cmux 창의 Claude pane에서:
 
 ## 📚 명령어
 
+### 토론
 | 명령 | 설명 |
 |------|------|
-| `/crosstalk <주제>` | 일반 토론 단축 — `install` 이후 활성 (debate dispatcher) |
+| `/crosstalk <주제>` | 일반 토론 단축 — `install` 이후 활성 |
 | `/crosstalk:debate <주제>` | 일반 토론 (1:1 또는 다자) |
+| `/crosstalk:debate --rules <name> <주제>` | 룰 일회성 명시 |
+| `/crosstalk:debate --persona <name> <주제>` | 페르소나 일회성 명시 |
 | `/crosstalk:review [PR번호]` | PR 리뷰 토론 (빠른 모드) |
-| `/crosstalk:review --deep [PR번호]` | PR 리뷰 토론 (깊은 모드 — 브랜치 checkout) |
-| `/crosstalk:setup` | cmux pane 라벨링 (구성 변경 시 재실행) |
-| `/crosstalk:launch` | cmux 자동 실행 + 분할 + AI CLI 시작 + 라벨링 |
+| `/crosstalk:review --deep [PR번호]` | PR 리뷰 토론 (깊은 모드) |
+
+### 룰/페르소나 관리
+| 명령 | 설명 |
+|------|------|
+| `/crosstalk:status` | 현재 active 셋업 + 사용 가능 목록 |
+| `/crosstalk:rules` | 토론 룰 전환/생성/편집/삭제 |
+| `/crosstalk:persona` | 페르소나 전환/생성/편집/삭제 |
+
+### 환경
+| 명령 | 설명 |
+|------|------|
+| `/crosstalk:setup` | cmux pane 라벨링 |
+| `/crosstalk:launch` | cmux 자동 분할 + AI CLI 시작 + 라벨링 |
 | `/crosstalk:install` | 최초 셋업 (컴포넌트 + AI CLI 자동 설치) |
 | `/crosstalk:uninstall` | 컴포넌트 제거 |
 
@@ -108,7 +122,45 @@ cmux 창의 Claude pane에서:
 
 ## 🎬 데모
 
-데모 영상 추후 추가 예정 (`docs/demo.gif`).
+![Demo](docs/demo.gif)
+
+cmux 안에서 `/crosstalk` 한 명령으로 셋이 토론 → 합의 → 종합 의견까지 자동 진행.
+
+---
+
+## 🎭 토론 룰 + 페르소나 커스터마이징
+
+기본 동작도 좋지만, 토론 분위기와 캐릭터를 조합하면 시나리오별 토론을 만들 수 있다.
+
+### 빌트인 룰
+
+| 룰 | 분위기 |
+|-----|--------|
+| `default` | 한 단락 3-5문장, 안전 모드, 건전 토론 |
+| `brainstorm` | 짧고 빠르게, 합의 우선, Yes-and 응답 |
+| `debate` | 깊이있게, 데빌즈 어드보킷, 합의 신중 |
+
+### 빌트인 페르소나
+
+| 페르소나 | 역할 매핑 |
+|---------|----------|
+| `default` | 페르소나 없음 — 본연의 시각 |
+| `senior-junior` | 시니어(보수) vs 주니어(진보) |
+| `critic-builder` | 비판가 vs 빌더 (Yes-and) |
+| `triple-perspective` | 보수/혁신/실용 (3분할 전용) |
+
+### 사용 예
+
+```
+/crosstalk:rules                              # 룰 전환/생성/편집
+/crosstalk:persona                            # 페르소나 관리
+/crosstalk:status                             # 현재 셋업 한눈에
+
+# 일회성으로 다른 룰/페르소나 적용
+/crosstalk:debate --rules debate --persona critic-builder PR 머지해도 되나?
+```
+
+새 룰/페르소나는 `~/.claude/crosstalk/rules/`, `~/.claude/crosstalk/personas/`에 마크다운으로 추가하면 즉시 사용 가능.
 
 ---
 

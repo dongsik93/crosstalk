@@ -142,6 +142,33 @@ chmod +x ~/.claude/scripts/crosstalk_bridge.sh
 
 # 단독 명령 활성화 (/crosstalk)
 cp "$PLUGIN_ROOT/assets/user-commands/crosstalk.md" ~/.claude/commands/
+
+# 룰 + 페르소나 디렉토리 + 빌트인 프리셋
+mkdir -p ~/.claude/crosstalk/rules ~/.claude/crosstalk/personas
+
+# 빌트인 룰 (이미 있으면 덮어쓰지 않음 — 사용자 편집 보존)
+for f in default brainstorm debate; do
+  if [ ! -f ~/.claude/crosstalk/rules/${f}.md ]; then
+    cp "$PLUGIN_ROOT/assets/rules/${f}.md" ~/.claude/crosstalk/rules/
+  fi
+done
+
+# 빌트인 페르소나 (이미 있으면 덮어쓰지 않음)
+for f in default senior-junior critic-builder triple-perspective; do
+  if [ ! -f ~/.claude/crosstalk/personas/${f}.md ]; then
+    cp "$PLUGIN_ROOT/assets/personas/${f}.md" ~/.claude/crosstalk/personas/
+  fi
+done
+
+# 초기 config (active 프리셋 추적)
+if [ ! -f ~/.claude/crosstalk/config.json ]; then
+  cat > ~/.claude/crosstalk/config.json <<'EOF'
+{
+  "active_rules": "default",
+  "active_persona": "default"
+}
+EOF
+fi
 ```
 
 각 단계 사용자에게 표시:
@@ -149,11 +176,14 @@ cp "$PLUGIN_ROOT/assets/user-commands/crosstalk.md" ~/.claude/commands/
 📦 Crosstalk 컴포넌트 설치 중...
   ✅ ~/.claude/scripts/crosstalk_bridge.sh
   ✅ ~/.claude/commands/crosstalk.md (단독 명령 /crosstalk 활성화)
+  ✅ ~/.claude/crosstalk/rules/   (default, brainstorm, debate)
+  ✅ ~/.claude/crosstalk/personas/ (default, senior-junior, critic-builder, triple-perspective)
+  ✅ ~/.claude/crosstalk/config.json (active: default rules + default persona)
 ```
 
 기존 파일이 있으면 덮어쓰기 전 확인:
-- 동일 내용 → 그대로
-- 다른 내용 → AskUserQuestion: *덮어쓸까요? / 건너뛸까요? / 취소*
+- bridge / 단독 명령: 동일 내용이면 그대로, 다르면 사용자에게 물어봄
+- 룰/페르소나: 이미 있으면 보존 (사용자 편집 우선) — 새 빌트인만 추가
 
 ## 4단계: 검증
 
@@ -186,6 +216,11 @@ cp "$PLUGIN_ROOT/assets/user-commands/crosstalk.md" ~/.claude/commands/
   또는 직접 cmux 띄우고:
   /crosstalk:setup     ← 라벨링만
   /crosstalk 주제      ← 토론 시작
+
+토론 룰/페르소나 커스터마이징:
+  /crosstalk:status    ← 현재 active 룰/페르소나 확인
+  /crosstalk:rules     ← 룰 전환/생성/편집 (default / brainstorm / debate)
+  /crosstalk:persona   ← 페르소나 전환/생성/편집
 ```
 
 ## 주의사항

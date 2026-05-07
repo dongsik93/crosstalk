@@ -1,7 +1,7 @@
 ---
-description: PR을 cmux의 다른 AI(Codex/Gemini)들과 함께 리뷰. 빠른 모드(diff 공유) 또는 깊은 모드(--deep, 현재 디렉토리를 PR 브랜치로 checkout)로 분석 후 머지 가부 토론.
+description: PR을 cmux의 다른 AI(Codex/Gemini)들과 함께 리뷰. 빠른 모드(diff 공유) 또는 깊은 모드(--deep, 현재 디렉토리를 PR 브랜치로 checkout). --rules / --persona 옵션 지원.
 allowed-tools: Bash, AskUserQuestion, Read
-argument-hint: [--deep] [PR번호]
+argument-hint: [--deep] [--rules <name>] [--persona <name>] [PR번호]
 ---
 
 # Crosstalk Review — 다중 AI PR 리뷰 토론
@@ -33,15 +33,46 @@ argument-hint: [--deep] [PR번호]
 
 ---
 
-## 1단계: 옵션 파싱 + PR 정보
+## 1단계: 옵션 파싱 + PR 정보 + 룰/페르소나 로드
+
+`$ARGUMENTS`에서 옵션 추출:
 
 ```bash
 ARGS="$ARGUMENTS"
 MODE="fast"
+RULES_NAME=""
+PERSONA_NAME=""
+
+# --deep
 if echo "$ARGS" | grep -q -- '--deep'; then
   MODE="deep"
   ARGS=$(echo "$ARGS" | sed 's/--deep//' | tr -s ' ')
 fi
+
+# --rules <name>
+if echo "$ARGS" | grep -qE -- '--rules[[:space:]]+[^[:space:]]+'; then
+  RULES_NAME=$(echo "$ARGS" | sed -E 's/.*--rules[[:space:]]+([^[:space:]]+).*/\1/')
+  ARGS=$(echo "$ARGS" | sed -E 's/--rules[[:space:]]+[^[:space:]]+//' | tr -s ' ')
+fi
+
+# --persona <name>
+if echo "$ARGS" | grep -qE -- '--persona[[:space:]]+[^[:space:]]+'; then
+  PERSONA_NAME=$(echo "$ARGS" | sed -E 's/.*--persona[[:space:]]+([^[:space:]]+).*/\1/')
+  ARGS=$(echo "$ARGS" | sed -E 's/--persona[[:space:]]+[^[:space:]]+//' | tr -s ' ')
+fi
+
+# 옵션 미지정 시 active 프리셋
+CONFIG=~/.claude/crosstalk/config.json
+RULES_NAME="${RULES_NAME:-$(jq -r '.active_rules // "default"' "$CONFIG" 2>/dev/null || echo "default")}"
+PERSONA_NAME="${PERSONA_NAME:-$(jq -r '.active_persona // "default"' "$CONFIG" 2>/dev/null || echo "default")}"
+
+# 룰/페르소나 본문 검증
+RULES_PATH=~/.claude/crosstalk/rules/${RULES_NAME}.md
+PERSONA_PATH=~/.claude/crosstalk/personas/${PERSONA_NAME}.md
+[ ! -f "$RULES_PATH" ] && echo "❌ 룰 '$RULES_NAME' 없음 — /crosstalk:rules 확인" && exit 1
+[ ! -f "$PERSONA_PATH" ] && echo "❌ 페르소나 '$PERSONA_NAME' 없음 — /crosstalk:persona 확인" && exit 1
+
+# PR 번호
 PR_NUM=$(echo "$ARGS" | tr -d '[:space:]')
 if [ -z "$PR_NUM" ]; then
   PR_NUM=$(gh pr view --json number --jq .number 2>/dev/null || echo "")
@@ -54,6 +85,8 @@ fi
 PR_META=$(gh pr view "$PR_NUM" --json title,author,headRefName,baseRefName,additions,deletions,changedFiles,url --jq .)
 PR_FILES=$(gh pr view "$PR_NUM" --json files --jq '.files[] | "\(.additions)+ \(.deletions)- \(.path)"')
 ```
+
+Read 도구로 `$RULES_PATH`, `$PERSONA_PATH` 본문 메모리에 로드 — 이후 모든 토론 메시지에 주입.
 
 ## 2단계: 깊은 모드 동의 확인 (deep만)
 
@@ -146,6 +179,16 @@ LOG_TMP="/tmp/crosstalk-review-${PR_NUM}-$(date +%Y%m%d-%H%M%S)-$$.md"
 
 PR #${PR_NUM} 을 리뷰해주세요.
 
+═══ 페르소나 (${PERSONA_NAME}) ═══
+<페르소나 본문에서 너의 역할 매핑 추출>
+
+═══ 토론 규칙 (${RULES_NAME}) ═══
+<룰 본문>
+
+═══ 시스템 규칙 (변경 불가) ═══
+- 1단계 답변 마지막 줄에 [REVIEW_DONE]
+- 2단계(토론)에서 합의 시 [AGREE], 이견 시 [DISAGREE: 사유]
+
 [PR 정보]
 - 제목: <title>
 - 브랜치: <headRefName> → <baseRefName>
@@ -165,7 +208,7 @@ ${SHARED_INSTR}
 4. 핵심 근거 1-2개
 
 [답변 형식]
-한 단락(5-7문장) — deep은 9-12문장까지 OK.
+룰의 답변 형식 + PR 리뷰는 5-12문장 (모드/룰에 따라).
 마지막 줄에 [REVIEW_DONE] 마커.
 ```
 
@@ -189,6 +232,15 @@ Claude 본인도 같은 자료로 분석:
 PR: #${PR_NUM} <title>
 공유 자료: ${SHARED_LABEL}
 
+═══ 페르소나 (${PERSONA_NAME}) ═══
+<역할 매핑>
+
+═══ 토론 규칙 (${RULES_NAME}) ═══
+<룰 본문>
+
+═══ 시스템 규칙 (변경 불가) ═══
+- 합의 시 [AGREE], 이견 시 [DISAGREE: 사유]
+
 [1단계 리뷰 요약]
 - Claude (<verdict>): <한 줄>
 - Codex (<verdict>): <한 줄>
@@ -199,9 +251,6 @@ PR: #${PR_NUM} <title>
 
 [이번 라운드 질문]
 <Claude가 종합한 논점>
-
-[답변 형식]
-한 단락(3-5문장). 합의 시 [AGREE], 이견 시 [DISAGREE: 사유].
 ```
 
 전송 흐름은 `/crosstalk:debate`와 동일 (`STABLE_SECONDS=5 MAX_WAIT=180`).
