@@ -32,6 +32,10 @@
 #   crosstalk_bridge.sh stop <surface>             → Ctrl+C 전송 (긴급 정지)
 #   crosstalk_bridge.sh save <path> <text>         → 토론 로그를 마크다운 파일에 append
 #   crosstalk_bridge.sh get-language               → ~/.claude/crosstalk/config.json 의 language(en/ko) 출력
+#   crosstalk_bridge.sh ensure-presets <lang>      → ~/.claude/crosstalk/{rules,personas}/<lang>/ 가 비어있으면
+#                                                  마켓플레이스 캐시에서 빌트인 프리셋을 자동 복사 (자가치유).
+#                                                  이미 있는 파일은 보존. <lang>: en|ko
+#                                                  stdout: 'OK' (정상) | 'SKIPPED reason=...' (마켓 캐시 못 찾음)
 #
 # v0.1.4 file-based transport:
 #   crosstalk_bridge.sh start-run                       → 새 run-id 생성, /tmp/crosstalk/run-<id>/ 디렉토리 + manifest.json 생성
@@ -113,6 +117,25 @@ validate_agent() {
     claude|codex|gemini) return 0 ;;
     *) echo "ERROR: invalid agent '$1' (expected claude/codex/gemini)" >&2; return 1 ;;
   esac
+}
+
+# 마켓플레이스 캐시 root 찾기 (install.md 와 동일 로직 — 자가치유에서 공유).
+# 못 찾으면 빈 줄 반환.
+find_marketplace_root() {
+  if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "$CLAUDE_PLUGIN_ROOT/../.." ]; then
+    local cand
+    cand=$(cd "$CLAUDE_PLUGIN_ROOT/../.." 2>/dev/null && pwd)
+    if [ -n "$cand" ] && [ -d "$cand/assets/rules" ] && [ -d "$cand/assets/personas" ]; then
+      echo "$cand"; return
+    fi
+  fi
+  for dir in "$HOME"/.claude/plugins/marketplaces/*; do
+    [ -d "$dir" ] || continue
+    if [ -d "$dir/assets/rules" ] && [ -d "$dir/assets/personas" ] && [ -d "$dir/plugins/crosstalk" ]; then
+      echo "$dir"; return
+    fi
+  done
+  echo ""
 }
 
 CMD="${1:-}"
@@ -230,13 +253,22 @@ case "$CMD" in
     # paste-bracket / 입력 처리 안정화:
     # 긴 텍스트가 한 번에 들어가면 첫 Enter가 텍스트의 일부로 흡수되거나,
     # 입력창이 paste 종료 처리 중이라 첫 Enter가 무시되는 케이스가 있다.
-    # → 잠시 기다렸다가 한 번 더 Enter 보내 실제 전송 보장.
-    # Gemini/Codex/Claude 모두 발생 가능 (Claude pane이 받는 쪽일 때도 발생).
+    # → claude/codex 는 잠시 기다렸다가 한 번 더 Enter 보내 실제 전송 보장.
+    # ⚠️ Gemini CLI는 두 번째 Enter를 *별도 submit*으로 받아들여 같은 메시지를
+    #     여러 번 답하는 사고가 생김. 그래서 gemini는 Enter 1회만.
+    #     gemini의 paste-bracket 흡수 사고는 SEND_GEMINI_RETRY=1 환경변수로 1회 재전송 가능.
     KIND=$("$0" detect "$SURFACE")
     case "$KIND" in
-      gemini|codex|claude)
+      codex|claude)
         sleep 0.5
         cmux send-key --surface "$SURFACE" enter >/dev/null
+        ;;
+      gemini)
+        # 기본은 Enter 1회. SEND_GEMINI_RETRY=1 이면 안전한 1회 더 (paste 흡수 의심 시).
+        if [ "${SEND_GEMINI_RETRY:-0}" = "1" ]; then
+          sleep 0.8
+          cmux send-key --surface "$SURFACE" enter >/dev/null
+        fi
         ;;
     esac
     ;;
@@ -340,6 +372,44 @@ case "$CMD" in
     esac
     ;;
 
+  ensure-presets)
+    LANG="${1:?language required (en|ko)}"
+    case "$LANG" in en|ko) ;; *) echo "ERROR: invalid language '$LANG'" >&2; exit 1 ;; esac
+
+    DEST_RULES="$HOME/.claude/crosstalk/rules/$LANG"
+    DEST_PERSONAS="$HOME/.claude/crosstalk/personas/$LANG"
+    mkdir -p "$DEST_RULES" "$DEST_PERSONAS"
+
+    # 비어있지 않으면 자가치유 불필요 (사용자 편집 보존). 단, 누락된 빌트인은 보충한다.
+    MARKETPLACE_ROOT=$(find_marketplace_root)
+    if [ -z "$MARKETPLACE_ROOT" ]; then
+      echo "SKIPPED reason=marketplace_cache_not_found"
+      # 디렉토리 자체는 만들었으니 호출측이 "디렉토리 비었음" 분기로 빠지진 않게 함
+      exit 0
+    fi
+
+    SRC_RULES="$MARKETPLACE_ROOT/assets/rules/$LANG"
+    SRC_PERSONAS="$MARKETPLACE_ROOT/assets/personas/$LANG"
+    if [ ! -d "$SRC_RULES" ] || [ ! -d "$SRC_PERSONAS" ]; then
+      echo "SKIPPED reason=marketplace_lang_missing lang=$LANG"
+      exit 0
+    fi
+
+    # 누락된 빌트인만 복사 (사용자 편집 보존)
+    for f in "$SRC_RULES"/*.md; do
+      [ -f "$f" ] || continue
+      base=$(basename "$f")
+      [ -f "$DEST_RULES/$base" ] || cp "$f" "$DEST_RULES/$base"
+    done
+    for f in "$SRC_PERSONAS"/*.md; do
+      [ -f "$f" ] || continue
+      base=$(basename "$f")
+      [ -f "$DEST_PERSONAS/$base" ] || cp "$f" "$DEST_PERSONAS/$base"
+    done
+
+    echo "OK"
+    ;;
+
   wait-ready)
     # 라벨 무시. 화면 푸터 패턴만으로 expected-kind와 일치하는지 확인.
     # 일치 → ready (exit 0). OAuth/로그인 화면 감지 → auth-needed (exit 2). 시간 초과 → timeout (exit 1).
@@ -394,7 +464,7 @@ case "$CMD" in
 {
   "run_id": "$RID",
   "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "version": "0.1.5"
+  "version": "0.1.6"
 }
 EOF
     echo "$RID"
@@ -414,10 +484,16 @@ EOF
     ;;
 
   wait-turn)
-    # 응답 파일이 안정될 때까지 대기
+    # 응답 파일이 안정될 때까지 대기.
+    #
+    # TRANSPORT_MODE (env):
+    #   file (기본)   — AI가 직접 RESP_FILE 에 답변 본문을 쓴다 (claude/codex 권장).
+    #   screen        — AI는 화면에 'CROSSTALK_BEGIN <msg-id>' ~ 'CROSSTALK_END <msg-id>' 블록만 출력한다.
+    #                   bridge가 매 tick scrollback에서 추출해서 RESP_FILE 에 직접 저장 (gemini 등 agentic CLI용).
+    #
     # msg-id 형식: run-<id>-r<NN>-<agent>-a<N>
     # 응답 파일: /tmp/crosstalk/run-<id>/responses/<agent>-r<NN>-a<N>.md
-    # 화면 푸터에 'DONE <msg-id>' 마커가 보이면 grace 5초 후 파일 확인
+    # 화면 푸터에 'DONE <msg-id>' 마커가 보이면 grace N초 후 파일 확인.
     # 상태:
     #   clean           — DONE 마커 + 파일 존재 + 크기/mtime 안정
     #   soft-complete   — 파일 존재 + 안정 / DONE 마커 없음
@@ -431,6 +507,12 @@ EOF
     MSG_ID="${3:?msg-id required}"
 
     validate_run_id "$RUN_ID" || exit 1
+
+    TRANSPORT_MODE="${TRANSPORT_MODE:-file}"
+    case "$TRANSPORT_MODE" in
+      file|screen) ;;
+      *) echo "ERROR: invalid TRANSPORT_MODE '$TRANSPORT_MODE' (expected file|screen)" >&2; exit 1 ;;
+    esac
 
     CROSSTALK_ROOT="${CROSSTALK_ROOT:-/tmp/crosstalk}"
     STABLE_SECONDS="${STABLE_SECONDS:-5}"
@@ -499,9 +581,31 @@ EOF
 
       SCREEN=$(cmux read-screen --surface "$SURFACE" --scrollback --lines 1000 2>/dev/null || echo "")
 
+      # screen 모드: BEGIN/END 블록 추출 후 RESP_FILE 에 저장 (idempotent, 매번 덮어씀).
+      # AI는 답변을 화면에만 쓰기 때문에 bridge가 파일 transport 인터페이스를 *대신* 만들어준다.
+      if [ "$TRANSPORT_MODE" = "screen" ]; then
+        # awk로 마지막 BEGIN/END 쌍을 추출 (가장 최신 답변).
+        BLOCK=$(printf '%s\n' "$SCREEN" | awk -v mid="$MSG_ID" '
+          $0 ~ "CROSSTALK_BEGIN " mid {capture=1; buf=""; next}
+          $0 ~ "CROSSTALK_END " mid {if (capture) {final=buf}; capture=0; next}
+          capture {buf = buf $0 "\n"}
+          END {if (final) printf "%s", final}
+        ')
+        if [ -n "$BLOCK" ]; then
+          # idempotent 덮어쓰기. 내용 동일하면 mtime만 갱신돼서 안정성 카운터에 영향 적음 → 비교 후 다를 때만 write.
+          if [ ! -f "$RESP_FILE" ] || [ "$(cat "$RESP_FILE" 2>/dev/null)" != "$BLOCK" ]; then
+            printf '%s' "$BLOCK" > "$RESP_FILE"
+          fi
+        fi
+      fi
+
       # 화면 푸터에 DONE <msg-id> 마커 확인 — 긴 답변이 위로 밀려도 잡도록 scrollback 1000줄.
+      # screen 모드에서는 END 마커가 곧 "답변 끝"이라 DONE 동등 처리.
       if [ "$DONE_SEEN" -eq 0 ]; then
         if echo "$SCREEN" | grep -qF "DONE $MSG_ID"; then
+          DONE_SEEN=1
+          DONE_AT=$ELAPSED
+        elif [ "$TRANSPORT_MODE" = "screen" ] && echo "$SCREEN" | grep -qF "CROSSTALK_END $MSG_ID"; then
           DONE_SEEN=1
           DONE_AT=$ELAPSED
         fi
@@ -610,7 +714,7 @@ EOF
     ;;
 
   *)
-    echo "Usage: $0 {peer|detect|list-peers|list-all|label|get-label|send|wait|capture|lines|prompt-count|save|stop|get-language|wait-ready|start-run|make-msg-id|wait-turn|read-response} [args...]" >&2
+    echo "Usage: $0 {peer|detect|list-peers|list-all|label|get-label|send|wait|capture|lines|prompt-count|save|stop|get-language|ensure-presets|wait-ready|start-run|make-msg-id|wait-turn|read-response} [args...]" >&2
     exit 2
     ;;
 esac

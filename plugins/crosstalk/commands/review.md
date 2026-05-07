@@ -68,6 +68,9 @@ case "$LANGUAGE" in en|ko) ;; *) LANGUAGE="en" ;; esac
 RULES_NAME="${RULES_NAME:-$(jq -r '.active_rules // "default"' "$CONFIG" 2>/dev/null || echo "default")}"
 PERSONA_NAME="${PERSONA_NAME:-$(jq -r '.active_persona // "default"' "$CONFIG" 2>/dev/null || echo "default")}"
 
+# 자가치유 — 디렉토리 비었으면 마켓 캐시에서 자동 복사
+~/.claude/scripts/crosstalk_bridge.sh ensure-presets "$LANGUAGE" >/dev/null 2>&1 || true
+
 # 룰/페르소나 본문 검증
 RULES_PATH=~/.claude/crosstalk/rules/${LANGUAGE}/${RULES_NAME}.md
 PERSONA_PATH=~/.claude/crosstalk/personas/${LANGUAGE}/${PERSONA_NAME}.md
@@ -212,7 +215,7 @@ if [ "$MODE" = "deep" ]; then
   CURRENT_DIR=$(pwd)
   SHARED_LABEL="현재 디렉토리: $CURRENT_DIR (PR 브랜치 체크아웃됨), diff 참조: $DIFF_PATH"
   if [ "$LANGUAGE" = "ko" ]; then
-    SHARED_INSTR="현재 디렉토리($CURRENT_DIR)가 PR 브랜치입니다. grep/find/read로 자유롭게 분석. 코드 수정/커밋/git 작업 금지. 단, 매 턴 메시지의 ═══ Transport ═══ 섹션이 지정한 응답 파일 1개 작성은 허용된다 (정확한 경로/파일명은 그 섹션이 알려준다)."
+    SHARED_INSTR="현재 디렉토리($CURRENT_DIR)가 PR 브랜치입니다. grep/find/read로 자유롭게 분석. 코드 수정/커밋/git 작업 금지. 응답 출력 방법은 매 턴 메시지의 ═══ Transport ═══ 섹션이 알려준다 (file 모드는 응답 파일 1개 작성 허용, screen 모드는 화면 BEGIN/END 블록만)."
   else
     SHARED_INSTR="The current directory ($CURRENT_DIR) is checked out to the PR branch. You may inspect files freely, but do not modify code, commit, or run git operations. The only allowed write is the response file specified by each turn's Transport section."
   fi
@@ -273,8 +276,11 @@ PR #${PR_NUM} 을 리뷰해주세요.
 - 2단계(토론)에서 합의 시 [AGREE], 이견 시 [DISAGREE: 사유]
 
 ═══ Transport (변경 불가) ═══
-이 턴 답변은 화면이 아니라 파일에 기록한다.
 
+**AGENT가 `gemini` 면 screen 모드, 그 외(`claude`/`codex`)는 file 모드**로 다음 중 하나를 그대로 주입한다.
+
+[file 모드 — claude/codex]
+이 턴 답변은 화면이 아니라 파일에 기록한다.
 1. 답변 본문 전체를 다음 파일에 그대로 써라:
      ${RUN_DIR}/responses/<RESP_BASENAME>
 2. 파일 작성이 끝나면 화면에 정확히 한 줄: DONE <MSG_ID>
@@ -282,6 +288,18 @@ PR #${PR_NUM} 을 리뷰해주세요.
 
   RESP_BASENAME = <agent>-r<NN>-a<N>.md   (1단계는 r01)
   MSG_ID        = run-<run-id>-r<NN>-<agent>-a<N>
+
+[screen 모드 — gemini]
+파일에 쓰지 마라. WriteFile/Shell 도구 사용 금지.
+화면에 정확히 한 번만:
+
+  CROSSTALK_BEGIN <MSG_ID>
+  <리뷰 본문>
+  CROSSTALK_END <MSG_ID>
+
+다른 텍스트(요약/박스/진행 상황)는 출력하지 마라. 같은 답변을 여러 번 출력하지 마라.
+
+  MSG_ID = run-<run-id>-r<NN>-gemini-a<N>
 
 [PR 정보]
 - 제목: <title>
@@ -325,12 +343,14 @@ RESP_BASENAME="${AGENT}-r01-a${ATTEMPT}.md"
 ~/.claude/scripts/crosstalk_bridge.sh send "$peer" "<치환된 메시지>"
 
 # wait-turn: stderr에 STATE 라인, exit code로 성공/실패
+# agent별 MAX_WAIT + transport 모드 (gemini=screen, 그 외=file)
 case "$AGENT" in
-  gemini) AGENT_MAX_WAIT=$([ "$MODE" = "deep" ] && echo 2400 || echo 900) ;;
-  *)      AGENT_MAX_WAIT=$([ "$MODE" = "deep" ] && echo 1800 || echo 600) ;;
+  gemini) AGENT_MAX_WAIT=$([ "$MODE" = "deep" ] && echo 2400 || echo 900); AGENT_TRANSPORT=screen ;;
+  *)      AGENT_MAX_WAIT=$([ "$MODE" = "deep" ] && echo 1800 || echo 600); AGENT_TRANSPORT=file   ;;
 esac
 STABLE_SECONDS=8 MAX_WAIT="$AGENT_MAX_WAIT" DONE_GRACE=5 \
 ACTIVITY_GRACE=30 ACTIVITY_EXTEND_BY=120 ACTIVITY_EXTEND_MAX=3 \
+TRANSPORT_MODE="$AGENT_TRANSPORT" \
   ~/.claude/scripts/crosstalk_bridge.sh wait-turn "$peer" "$RUN_ID" "$MSG_ID" 2> /tmp/crosstalk_state
 WAIT_RC=$?
 STATE_LINE=$(cat /tmp/crosstalk_state)
@@ -374,11 +394,16 @@ PR: #${PR_NUM} <title>
 - 합의 시 [AGREE], 이견 시 [DISAGREE: 사유]
 
 ═══ Transport (변경 불가) ═══
-이 턴 답변은 파일에 기록.
-1. ${RUN_DIR}/responses/<RESP_BASENAME>  에 본문 그대로
-2. 화면에 한 줄: DONE <MSG_ID>
-   RESP_BASENAME = <agent>-r<NN>-a<N>.md
-   MSG_ID        = run-<run-id>-r<NN>-<agent>-a<N>
+**AGENT가 gemini면 screen, 그 외엔 file**.
+
+[file — claude/codex] ${RUN_DIR}/responses/<RESP_BASENAME> 에 본문 그대로 쓰고 화면에 `DONE <MSG_ID>` 한 줄.
+[screen — gemini] 파일/툴 금지. 화면에 다음만:
+  CROSSTALK_BEGIN <MSG_ID>
+  <답변 본문>
+  CROSSTALK_END <MSG_ID>
+
+  RESP_BASENAME = <agent>-r<NN>-a<N>.md
+  MSG_ID        = run-<run-id>-r<NN>-<agent>-a<N>
 
 [1단계 리뷰 요약]
 - Claude (<verdict>): <한 줄>

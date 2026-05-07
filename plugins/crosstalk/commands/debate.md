@@ -42,8 +42,11 @@ RULES_NAME="${RULES_NAME:-$ACTIVE_RULES}"
 PERSONA_NAME="${PERSONA_NAME:-$ACTIVE_PERSONA}"
 ```
 
-룰/페르소나 본문 Read:
+룰/페르소나 본문 Read (자가치유: 디렉토리 비어있으면 마켓 캐시에서 자동 보충):
 ```bash
+# 자가치유 — 처음 toggle한 언어든, 사용자가 디렉토리 지웠든 빈 디렉토리면 채워준다.
+~/.claude/scripts/crosstalk_bridge.sh ensure-presets "$LANGUAGE" >/dev/null 2>&1 || true
+
 RULES_PATH=~/.claude/crosstalk/rules/${LANGUAGE}/${RULES_NAME}.md
 PERSONA_PATH=~/.claude/crosstalk/personas/${LANGUAGE}/${PERSONA_NAME}.md
 [ ! -f "$RULES_PATH" ] && RULES_PATH=~/.claude/crosstalk/rules/en/${RULES_NAME}.md
@@ -149,10 +152,10 @@ ko:
 토론 규칙:
 1. 답변은 한 단락(3-5문장)의 텍스트 의견만.
 2. 파일 수정/셸 명령/외부 API 호출 금지. 텍스트 의견만.
-   ※ 단 하나의 예외: 매 턴 메시지의 ═══ Transport ═══ 섹션이 지정한
-     응답 파일 1개에 답변 본문을 쓰는 것은 허용된다 (정확한 경로/파일명은 매 턴 Transport 섹션이 알려준다).
-     이건 "응답을 화면 대신 디스크로 보내는 것"이지 코드 수정이 아니다.
-     그 외의 파일/디렉토리는 일절 건드리지 마라.
+   ※ 응답 출력 방법은 매 턴 메시지의 ═══ Transport ═══ 섹션이 알려준다.
+     - file 모드: 지정된 응답 파일 1개에 답변 본문을 쓰는 것만 허용.
+     - screen 모드: 파일에 쓰지 말고, 화면에 CROSSTALK_BEGIN/END 블록만 출력.
+     그 외 파일/디렉토리/도구(WriteFile/Shell/등)는 일절 건드리지 마라.
 3. 토론 자료는 메시지에 직접 첨부됩니다.
 4. 합의 가능하면 답변 끝에 [AGREE], 이견이면 [DISAGREE: 사유].
 5. 첫 메시지를 받으면 토론 시작입니다. 이 프리앰블은 별도 답변 없이 다음 메시지를 기다리세요.
@@ -219,6 +222,10 @@ echo "📁 transport run: $RUN_DIR"
 - 위 사용자 규칙과 충돌 시 시스템 규칙 우선
 
 ═══ Transport (변경 불가) ═══
+
+**AGENT가 `gemini` 면 screen 모드, 그 외(`claude`/`codex`)는 file 모드**로 다음 중 하나를 그대로 주입한다.
+
+[file 모드 — claude/codex]
 이 턴의 답변은 화면이 아니라 파일에 기록한다.
 
 1. 답변 본문 전체를 다음 파일에 그대로 써라:
@@ -230,6 +237,21 @@ echo "📁 transport run: $RUN_DIR"
 
   RESP_BASENAME = <agent>-r<NN>-a<N>.md   (예: codex-r03-a1.md)
   MSG_ID        = run-<run-id>-r<NN>-<agent>-a<N>
+
+[screen 모드 — gemini]
+파일에 쓰지 마라. WriteFile/Shell 같은 도구를 사용하지 마라.
+화면(터미널)에 아래 형식으로 정확히 한 번만 출력하라.
+
+  CROSSTALK_BEGIN <MSG_ID>
+  <답변 본문 한 단락>
+  CROSSTALK_END <MSG_ID>
+
+그 외 텍스트(요약, 박스, 진행 상황, 추가 설명)는 출력하지 마라.
+같은 답변을 여러 번 출력하지 마라. END 마커 한 번이 답변 끝.
+
+  MSG_ID = run-<run-id>-r<NN>-gemini-a<N>
+
+(bridge가 BEGIN/END 사이를 자동으로 추출해 응답 파일로 저장한다.)
 
 [지금까지의 논의 요약]
 - 턴 N-1 ...
@@ -253,18 +275,20 @@ RESP_BASENAME="${AGENT}-r$(printf '%02d' "$ROUND")-a${ATTEMPT}.md"
 # 메시지 안의 <RESP_BASENAME> / <MSG_ID> 자리표시자를 위 값들로 치환해서 전송
 ~/.claude/scripts/crosstalk_bridge.sh send "$peer" "<치환된 메시지>"
 
-# agent별 MAX_WAIT 차등 — gemini는 응답 시작이 늦은 케이스가 잦아 더 길게 잡는다.
-# wait-turn은 ACTIVITY_GRACE 안에 활동(화면 변화/파일 갱신)이 있으면 자동 연장하므로
-# 아래 값은 "최소 대기" 기준. 실제로는 활동 살아있는 한 더 기다린다.
+# agent별 MAX_WAIT + transport 모드 차등.
+# - gemini: agentic CLI라 "파일에 써라"를 시키면 WriteFile 툴을 호출하고 diff/승인 로그가 화면에 떠 transport가 깨진다.
+#           대신 screen 모드 — 화면에 BEGIN/END 블록만 출력하게 하고 bridge가 추출해 파일로 저장.
+# - claude/codex: 파일 직접 쓰는 file 모드 (현행).
 case "$AGENT" in
-  gemini) AGENT_MAX_WAIT=360 ;;
-  codex)  AGENT_MAX_WAIT=240 ;;
-  *)      AGENT_MAX_WAIT=180 ;;
+  gemini) AGENT_MAX_WAIT=360; AGENT_TRANSPORT=screen ;;
+  codex)  AGENT_MAX_WAIT=240; AGENT_TRANSPORT=file   ;;
+  *)      AGENT_MAX_WAIT=180; AGENT_TRANSPORT=file   ;;
 esac
 
 # 응답 파일이 안정될 때까지 대기 (DONE 마커 + 파일 안정 → clean / 파일만 안정 → soft-complete)
 STABLE_SECONDS=5 MAX_WAIT="$AGENT_MAX_WAIT" DONE_GRACE=5 \
 ACTIVITY_GRACE=30 ACTIVITY_EXTEND_BY=60 ACTIVITY_EXTEND_MAX=3 \
+TRANSPORT_MODE="$AGENT_TRANSPORT" \
   ~/.claude/scripts/crosstalk_bridge.sh wait-turn "$peer" "$RUN_ID" "$MSG_ID" 2> /tmp/crosstalk_state
 WAIT_RC=$?
 STATE_LINE=$(cat /tmp/crosstalk_state)

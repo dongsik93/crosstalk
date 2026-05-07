@@ -1,10 +1,10 @@
 ---
 description: Install Crosstalk components, choose interface language, validate environment, and optionally install missing AI CLIs.
 allowed-tools: Bash, AskUserQuestion, Read
-argument-hint: (인자 없음)
+argument-hint: [--presets-only [--language en|ko]]
 ---
 
-# Crosstalk Install — Setup Automation (v0.1.5)
+# Crosstalk Install — Setup Automation (v0.1.6)
 
 마켓에서 플러그인 설치 직후 한 번 실행. 다음을 수행:
 
@@ -18,7 +18,7 @@ argument-hint: (인자 없음)
    - `~/.claude/crosstalk/config.json` (active 프리셋 추적)
 5. 인증 안내 (gh / 각 CLI 첫 실행 시 OAuth)
 
-## v0.1.5 범위
+## v0.1.6 범위
 
 - ✅ Claude Code 측 컴포넌트 자동 설치
 - ✅ AI CLI npm 자동 설치 (claude/codex/gemini)
@@ -27,6 +27,58 @@ argument-hint: (인자 없음)
   - Codex pane은 *참여자*로만 동작 (Claude 사회자 토론에 응답)
 
 ---
+
+## 0단계: 옵션 파싱 — `--presets-only` 빠른 경로
+
+전체 install 안 돌리고 빌트인 룰/페르소나만 보충하고 싶을 때 사용.
+
+```bash
+ARGS="$ARGUMENTS"
+PRESETS_ONLY=false
+LANG_REQUESTED=""
+
+if echo "$ARGS" | grep -q -- '--presets-only'; then
+  PRESETS_ONLY=true
+  ARGS=$(echo "$ARGS" | sed 's/--presets-only//' | tr -s ' ')
+fi
+
+if echo "$ARGS" | grep -qE -- '--language[[:space:]]+(en|ko)\b'; then
+  LANG_REQUESTED=$(echo "$ARGS" | sed -E 's/.*--language[[:space:]]+(en|ko).*/\1/')
+fi
+```
+
+`PRESETS_ONLY=true` 면 환경 검증 / AI CLI 설치 / 언어 선택 / bridge·command 복사를 모두 건너뛰고 곧장 *프리셋 보충* 단계로 점프:
+
+```bash
+if $PRESETS_ONLY; then
+  CONFIG=~/.claude/crosstalk/config.json
+  if [ -n "$LANG_REQUESTED" ]; then
+    TARGET_LANG="$LANG_REQUESTED"
+  else
+    TARGET_LANG=$(jq -r '.language // "en"' "$CONFIG" 2>/dev/null || echo "en")
+  fi
+  case "$TARGET_LANG" in en|ko) ;; *) TARGET_LANG="en" ;; esac
+
+  RESULT=$(~/.claude/scripts/crosstalk_bridge.sh ensure-presets "$TARGET_LANG" 2>&1)
+  case "$RESULT" in
+    OK)
+      echo "✅ Presets refreshed for language: $TARGET_LANG"
+      echo "   ~/.claude/crosstalk/rules/${TARGET_LANG}/"
+      echo "   ~/.claude/crosstalk/personas/${TARGET_LANG}/"
+      ;;
+    SKIPPED*)
+      echo "⚠️  $RESULT"
+      echo "   Marketplace cache not found. Run /plugin install crosstalk@dongsik93/crosstalk first."
+      ;;
+    *)
+      echo "ERROR: $RESULT"
+      ;;
+  esac
+  exit 0
+fi
+```
+
+> 일반 install (옵션 없이)은 1단계부터 그대로 진행.
 
 ## 1단계: 환경 검증
 
@@ -265,7 +317,7 @@ done
 ## 6단계: 완료 안내 + 다음 단계
 
 ```
-✅ Crosstalk v0.1.5 installed!
+✅ Crosstalk v0.1.6 installed!
 
 설치된 항목:
   - ~/.claude/scripts/crosstalk_bridge.sh

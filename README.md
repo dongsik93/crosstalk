@@ -1,7 +1,7 @@
 # Crosstalk
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.1.5-blue)
+![Version](https://img.shields.io/badge/version-0.1.6-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-black)
 
@@ -134,9 +134,9 @@ Deep PR review is available but experimental:
 
 | Command | Description |
 | --- | --- |
-| `/crosstalk:install` | Install Crosstalk components into the user home directory |
+| `/crosstalk:install` | Install Crosstalk components into the user home directory (use `--presets-only [--language en\|ko]` to refresh just the rules/personas) |
 | `/crosstalk:launch` | Create cmux splits, start AI CLIs, and label panes |
-| `/crosstalk:setup` | Label already-open cmux panes |
+| `/crosstalk:setup` | Label already-open cmux panes (use `--language en\|ko` to also switch UI language) |
 | `/crosstalk:status` | Show active rules, personas, and pane status |
 | `/crosstalk:rules` | Switch, create, edit, or delete debate rules |
 | `/crosstalk:persona` | Switch, create, edit, or delete personas |

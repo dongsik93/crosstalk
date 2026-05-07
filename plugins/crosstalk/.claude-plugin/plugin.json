@@ -1,6 +1,6 @@
 {
   "name": "crosstalk",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Multi-agent AI debate slash commands powered by cmux split panes. Claude, Codex, and Gemini debate in one screen and produce a synthesized verdict.",
   "author": {
     "name": "dongsik93"

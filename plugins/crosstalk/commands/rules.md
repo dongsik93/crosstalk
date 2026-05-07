@@ -14,10 +14,14 @@ argument-hint: (인자 없음)
 CONFIG=~/.claude/crosstalk/config.json
 LANGUAGE=$(jq -r '.language // "en"' "$CONFIG" 2>/dev/null || echo "en")
 case "$LANGUAGE" in en|ko) ;; *) LANGUAGE="en" ;; esac
+
+# 자가치유 — 빈 디렉토리면 마켓 캐시에서 빌트인 룰 자동 보충
+~/.claude/scripts/crosstalk_bridge.sh ensure-presets "$LANGUAGE" >/dev/null 2>&1 || true
+
 RULES_DIR=~/.claude/crosstalk/rules/${LANGUAGE}
 
-if [ ! -d "$RULES_DIR" ]; then
-  [ "$LANGUAGE" = "ko" ] && echo "❌ Crosstalk 셋업이 안 되어 있습니다. /crosstalk:install 먼저 실행." || echo "❌ Crosstalk is not installed. Run /crosstalk:install first."
+if [ ! -d "$RULES_DIR" ] || [ -z "$(ls -A "$RULES_DIR" 2>/dev/null)" ]; then
+  [ "$LANGUAGE" = "ko" ] && echo "❌ 룰 프리셋을 찾지 못했습니다. /crosstalk:install 또는 /crosstalk:install --presets-only 실행." || echo "❌ No rule presets found. Run /crosstalk:install or /crosstalk:install --presets-only."
   exit 1
 fi
 

@@ -20,6 +20,10 @@ fi
 
 LANGUAGE=$(jq -r '.language // "en"' "$CONFIG" 2>/dev/null || echo "en")
 case "$LANGUAGE" in en|ko) ;; *) LANGUAGE="en" ;; esac
+
+# 자가치유 — 디렉토리 비어있으면 마켓 캐시에서 자동 보충
+~/.claude/scripts/crosstalk_bridge.sh ensure-presets "$LANGUAGE" >/dev/null 2>&1 || true
+
 RULES_DIR=~/.claude/crosstalk/rules/${LANGUAGE}
 PERSONAS_DIR=~/.claude/crosstalk/personas/${LANGUAGE}
 ACTIVE_RULES=$(jq -r '.active_rules // "default"' "$CONFIG")

@@ -1,12 +1,61 @@
 ---
-description: Label cmux panes for Crosstalk detection. User-facing prompts support en/ko.
+description: Label cmux panes for Crosstalk detection, or switch UI language with --language en|ko.
 allowed-tools: Bash, AskUserQuestion
-argument-hint: (인자 없음)
+argument-hint: [--language en|ko]
 ---
 
-# Crosstalk Setup — cmux 라벨링
+# Crosstalk Setup — cmux 라벨링 / 언어 전환
 
-`/crosstalk:debate`, `:review`가 옆 pane의 CLI 종류를 빠르고 정확하게 식별하도록 cmux 탭에 라벨(`ct-claude`, `ct-codex`, `ct-gemini`, `ct-shell`)을 박는다.
+두 가지 용도:
+
+1. **cmux 라벨링** (기본): `/crosstalk:debate`, `:review`가 옆 pane의 CLI 종류를 빠르고 정확하게 식별하도록 cmux 탭에 라벨(`ct-claude`, `ct-codex`, `ct-gemini`, `ct-shell`)을 박는다.
+2. **언어 전환**: `/crosstalk:setup --language ko` 또는 `--language en` 으로 UI 언어를 즉시 토글. 인자 없이 호출하면 `AskUserQuestion`으로 묻는다. 토글 후엔 라벨링도 그대로 진행.
+
+## 0단계: 옵션 파싱 — `--language`
+
+```bash
+ARGS="$ARGUMENTS"
+LANG_REQUESTED=""
+
+# --language en|ko
+if echo "$ARGS" | grep -qE -- '--language[[:space:]]+(en|ko)\b'; then
+  LANG_REQUESTED=$(echo "$ARGS" | sed -E 's/.*--language[[:space:]]+(en|ko).*/\1/')
+  ARGS=$(echo "$ARGS" | sed -E 's/--language[[:space:]]+(en|ko)//' | tr -s ' ')
+fi
+
+# 단독 'en'/'ko' (인자 1개)도 호환 — 사용자가 '/crosstalk:setup ko'로 친 케이스
+if [ -z "$LANG_REQUESTED" ]; then
+  case "$(echo "$ARGS" | tr -d '[:space:]')" in
+    en|ko) LANG_REQUESTED=$(echo "$ARGS" | tr -d '[:space:]'); ARGS="" ;;
+  esac
+fi
+
+CONFIG=~/.claude/crosstalk/config.json
+CURRENT_LANG=$(jq -r '.language // "en"' "$CONFIG" 2>/dev/null || echo "en")
+
+# 언어 변경 요청이 있으면 config 업데이트
+if [ -n "$LANG_REQUESTED" ] && [ "$LANG_REQUESTED" != "$CURRENT_LANG" ]; then
+  mkdir -p ~/.claude/crosstalk
+  if [ -f "$CONFIG" ]; then
+    jq --arg lang "$LANG_REQUESTED" '.language = $lang' "$CONFIG" > "$CONFIG.tmp" && mv "$CONFIG.tmp" "$CONFIG"
+  else
+    cat > "$CONFIG" <<EOF
+{
+  "active_rules": "default",
+  "active_persona": "default",
+  "language": "$LANG_REQUESTED"
+}
+EOF
+  fi
+  CURRENT_LANG="$LANG_REQUESTED"
+  [ "$CURRENT_LANG" = "ko" ] && echo "✅ 언어를 한국어(ko)로 변경했습니다." || echo "✅ Language switched to English (en)."
+fi
+
+LANGUAGE="$CURRENT_LANG"
+case "$LANGUAGE" in en|ko) ;; *) LANGUAGE="en" ;; esac
+```
+
+> 언어만 바꾸고 라벨링은 건너뛰고 싶으면 `--language ko --skip-labeling` 같은 식으로 쓸 수 있게 하지 않았다. 라벨링 자체가 빠르고 idempotent하므로 한 번에 처리한다.
 
 ## 왜 필요한가
 
@@ -28,11 +77,9 @@ argument-hint: (인자 없음)
 
 ## 1단계: 환경 스캔
 
-```bash
-CONFIG=~/.claude/crosstalk/config.json
-LANGUAGE=$(jq -r '.language // "en"' "$CONFIG" 2>/dev/null || echo "en")
-case "$LANGUAGE" in en|ko) ;; *) LANGUAGE="en" ;; esac
+`LANGUAGE` 는 0단계에서 이미 결정됨.
 
+```bash
 ~/.claude/scripts/crosstalk_bridge.sh list-all
 ```
 
