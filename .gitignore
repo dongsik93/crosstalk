@@ -1,0 +1,39 @@
+# macOS
+.DS_Store
+._*
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# Node (혹시 npm 작업 디렉토리가 생기면)
+node_modules/
+package-lock.json
+
+# Logs
+*.log
+*.log.*
+
+# Temp files
+*.tmp
+*.bak
+*.bak.*
+.tmp/
+tmp/
+
+# Crosstalk runtime artifacts (사용자 머신에서 생성, 레포에 포함 X)
+fight-*.md
+crosstalk-*.md
+pr-*.diff
+fights/
+
+# OS-specific
+Thumbs.db
+
+# Personal/local config that should never be committed
+.env
+.env.local
+.env.*.local
+secrets/
