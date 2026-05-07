@@ -1,7 +1,7 @@
 ---
 description: Run a Crosstalk debate with peer AI CLI panes. Supports en/ko UI, rules, and personas.
 allowed-tools: Bash, AskUserQuestion, Read
-argument-hint: [--rules <name>] [--persona <name>] <토론 주제>
+argument-hint: [--rules <name>] [--persona <name>] [--transport off|file|screen] <토론 주제>
 ---
 
 # Crosstalk — 다중 AI 토론 (Claude 사회자)
@@ -13,6 +13,10 @@ cmux 안에서 분할된 다른 AI CLI(Codex/Gemini)들과 자동으로 토론�
 
 - `--rules <name>` — 일회성 룰 프리셋 명시 (예: `brainstorm`, `debate`, `default`)
 - `--persona <name>` — 일회성 페르소나 프리셋 명시 (예: `senior-junior`, `critic-builder`)
+- `--transport off|file|screen` — 답변 받는 방법. **기본 `off`** (자연스러운 핑-퐁 토론, 화면 캡처).
+  - `off` (기본): 사회자가 화면 텍스트를 직접 읽고 정리. AI에게 transport 지시 안 함 → 답변 instruction following 좋음.
+  - `file`: 답변 본문을 별도 파일에 쓰게 함. 긴 답변 안전. (claude/codex 권장)
+  - `screen`: 답변을 BEGIN/END 블록으로 출력하게 함. (gemini용 — agentic 도구 사고 방지)
 - 옵션 없으면 `~/.claude/crosstalk/config.json`의 active 프리셋 사용
 
 룰/페르소나 관리는 `/crosstalk:rules`, `/crosstalk:persona`, `/crosstalk:status` 참고.
@@ -29,7 +33,13 @@ cmux 안에서 분할된 다른 AI CLI(Codex/Gemini)들과 자동으로 토론�
 `$ARGUMENTS`에서 옵션 추출:
 - `--rules <name>` (있으면) → `RULES_NAME=<name>`
 - `--persona <name>` (있으면) → `PERSONA_NAME=<name>`
+- `--transport off|file|screen` (있으면) → `TRANSPORT_OPTION=<value>`. **기본 `off`** — 자연스러운 핑-퐁 토론.
 - 나머지 텍스트 = 토론 주제
+
+```bash
+TRANSPORT_OPTION="${TRANSPORT_OPTION:-off}"
+case "$TRANSPORT_OPTION" in off|file|screen) ;; *) TRANSPORT_OPTION="off" ;; esac
+```
 
 옵션 없으면 active 프리셋 로드:
 ```bash
@@ -124,9 +134,32 @@ Read 도구로 두 파일 본문 메모리에 로드. 이후 모든 토론 메�
 
 선택이 "취소"면 즉시 종료.
 
-## 3단계: 안전 모드 프리앰블
+## 3단계: 안전 모드 + 페르소나 + 룰 preamble
 
-선택된 모든 참여자에게 한 번씩 프리앰블 메시지 전송. `LANGUAGE=en`이면 영어, `LANGUAGE=ko`이면 한국어를 사용한다. Transport 핵심 지시는 매 턴 영어로 고정한다.
+**중요: 페르소나/룰/시스템 마커는 이 preamble에서 *한 번만* 박는다. 이후 매 턴 메시지에는 다시 박지 않는다.** AI가 매 턴 셋업을 다시 처리하느라 instruction following을 망치는 걸 막기 위함.
+
+각 참여자에게 다음 형태로 한 번씩 전송:
+
+```
+[Crosstalk preamble]
+
+주제: <주제>
+
+═══ 페르소나 (${PERSONA_NAME}) ═══
+<페르소나 본문 — 너의 역할 매핑만 추출해서 한 줄~세 줄>
+
+═══ 토론 규칙 (${RULES_NAME}) ═══
+<룰 본문 그대로>
+
+═══ 안전 규칙 (변경 불가) ═══
+1. 답변은 한 단락 텍스트만.
+2. WriteFile/Shell/외부 API 같은 도구 사용 금지. 화면에 답변 텍스트만.
+3. 합의 시 [AGREE], 이견 시 [DISAGREE: 사유].
+4. 사회자(Claude)가 매 라운드 짧은 메시지로 차례를 넘긴다 — 그 메시지에만 답해라.
+5. 이 preamble에는 답하지 마라. 다음 메시지를 기다려라.
+```
+
+`LANGUAGE=en`이면 영어, `LANGUAGE=ko`이면 한국어. 다음은 fallback 안내용 짧은 버전 (실제 본문은 위 형태로 페르소나/룰을 주입해 보낸다):
 
 en:
 ```
@@ -151,11 +184,11 @@ ko:
 
 토론 규칙:
 1. 답변은 한 단락(3-5문장)의 텍스트 의견만.
-2. 파일 수정/셸 명령/외부 API 호출 금지. 텍스트 의견만.
-   ※ 응답 출력 방법은 매 턴 메시지의 ═══ Transport ═══ 섹션이 알려준다.
-     - file 모드: 지정된 응답 파일 1개에 답변 본문을 쓰는 것만 허용.
-     - screen 모드: 파일에 쓰지 말고, 화면에 CROSSTALK_BEGIN/END 블록만 출력.
-     그 외 파일/디렉토리/도구(WriteFile/Shell/등)는 일절 건드리지 마라.
+2. 파일 수정/셸 명령/외부 API 호출 금지. **텍스트 의견만 출력**.
+   - 도구(WriteFile/Shell/등) 사용 금지. 그냥 화면에 답변 텍스트만 출력하면 된다.
+   - 사회자가 화면을 보고 직접 읽는다 — 별도 마커나 파일 작성 불필요.
+   - (사회자가 `--transport file|screen` 옵션을 켰으면 매 턴 ═══ Transport ═══ 섹션이 별도 지시를 준다.
+      그 경우엔 그 지시만 따르면 된다.)
 3. 토론 자료는 메시지에 직접 첨부됩니다.
 4. 합의 가능하면 답변 끝에 [AGREE], 이견이면 [DISAGREE: 사유].
 5. 첫 메시지를 받으면 토론 시작입니다. 이 프리앰블은 별도 답변 없이 다음 메시지를 기다리세요.
@@ -185,111 +218,140 @@ LOG_TMP="/tmp/crosstalk-$(date +%Y%m%d-%H%M%S)-$$.md"
 - 모드: 1:1(vs <CLI>) 또는 다자
 "
 
-# AI 응답 transport run
-RUN_ID=$(~/.claude/scripts/crosstalk_bridge.sh start-run)
-RUN_DIR="/tmp/crosstalk/run-${RUN_ID}"
-echo "📁 transport run: $RUN_DIR"
+# `--transport off` 면 run 디렉토리 안 만든다 (필요 없음).
+if [ "$TRANSPORT_OPTION" != "off" ]; then
+  RUN_ID=$(~/.claude/scripts/crosstalk_bridge.sh start-run)
+  RUN_DIR="/tmp/crosstalk/run-${RUN_ID}"
+  echo "📁 transport run: $RUN_DIR"
+fi
 ```
 
-이후 모든 AI 응답은 화면 캡처가 아니라 `$RUN_DIR/responses/<agent>-r<NN>-a<N>.md` 파일에서 읽는다.
+`TRANSPORT_OPTION=off` (기본)이면 답변은 화면 캡처. `file`/`screen`이면 `$RUN_DIR/responses/<agent>-r<NN>-a<N>.md`.
 
-## 5단계: 토론 실행 (파일 기반 transport)
+## 5단계: 토론 실행 — 핑-퐁 패턴
 
-### 메시지 템플릿 — 모든 AI 답변에 강제
+**핵심: 페르소나/룰/시스템 마커는 3단계 preamble에서 *한 번만* 박았다. 이후 턴 메시지는 짧은 대화체.**
 
-매 턴 메시지는 self-contained로 보내되, **transport 섹션**을 반드시 포함한다. 이걸 통해 AI가 응답을 화면이 아니라 파일에 쓰게 된다.
+### 5-A. 첫 턴 (Round 1): 주제 던지기
+
+3단계 preamble을 *각 참여자에게 이미 한 번씩* 보냈다고 가정. 첫 라운드는 **주제만 짧게 던진다**:
 
 ```
-[Claude vs <CLI> 토론 - 턴 N/15]   (1:1)
-또는
-[다자 토론 라운드 N/10]              (다자)
+[Round 1] 주제: <주제>
 
-주제: <주제>
+너의 의견을 한 단락(3-5문장)으로. 합의 가능하면 [AGREE], 이견이면 [DISAGREE: 사유]로 끝.
+```
 
-═══ 페르소나 (${PERSONA_NAME}) ═══
-<페르소나 파일에서 *너의 역할 매핑*만 추출해서 주입>
-- 사회자(호출자) → moderator 섹션
-- 첫 참여자 → 페르소나 파일의 두 번째 역할
-- 두 번째 참여자 → 페르소나 파일의 세 번째 역할
-- 페르소나가 default면 *각자 본연의 시각으로 토론* 한 줄만
+(`TRANSPORT_OPTION=file` 또는 `screen`이면 메시지 끝에 ═══ Transport ═══ 섹션을 옵션값에 맞춰 추가. `off`면 안 넣음.)
 
-═══ 토론 규칙 (${RULES_NAME}) ═══
-<룰 파일 본문 그대로>
+### 5-B. 이후 턴 (follow-up): 대화체
 
-═══ 시스템 규칙 (변경 불가) ═══
-- 합의 시 답변 끝에 [AGREE]
-- 이견 시 답변 끝에 [DISAGREE: 사유]
-- 위 사용자 규칙과 충돌 시 시스템 규칙 우선
+직전 답변을 짧게 인용하고 차례를 넘긴다. **페르소나/룰/시스템 마커 다시 안 박는다 — preamble이 살아있음.**
 
-═══ Transport (변경 불가) ═══
+1:1 예:
+```
+[Round 3] codex가 직전에 이렇게 말했어:
+"파전이 더 적합 — 습한 날 뜨거운 국물은 부담."
 
-**AGENT가 `gemini` 면 screen 모드, 그 외(`claude`/`codex`)는 file 모드**로 다음 중 하나를 그대로 주입한다.
+너 입장은? 한 단락으로.
+```
 
-[file 모드 — claude/codex]
-이 턴의 답변은 화면이 아니라 파일에 기록한다.
+다자 예:
+```
+[Round 2] 직전 라운드 정리:
+- Codex: 파전 (습도 부담 근거)
+- Gemini: 국밥 (정서적 위로 근거)
+
+너 차례. 어느 쪽에 동의/반박할지 한 단락.
+```
+
+> 메시지 길이 가이드: **first-turn 200자 이내, follow-up 300자 이내**. 페르소나/룰 다시 박지 마라.
+> 사회자(Claude)가 *직전 답변 한 줄 요약*만 메시지에 붙인다. 전체 히스토리 X.
+
+> `TRANSPORT_OPTION=off` (기본)이면 이 메시지에 **═══ Transport ═══ 섹션을 넣지 않는다**.
+> `file`/`screen`이면 메시지 끝에 옵션값에 맞춘 Transport 섹션을 추가 (자세한 형식은 [Transport 섹션 참조](#transport-블록-옵션-file--screen일-때만)).
+
+### Transport 블록 (옵션 file / screen일 때만)
+
+`TRANSPORT_OPTION=off`이면 이 블록을 *통째로* 메시지에서 빼라.
+
+[file — claude/codex 권장]
+```
+═══ Transport ═══
+이 턴 답변은 화면이 아니라 파일에 기록한다.
 
 1. 답변 본문 전체를 다음 파일에 그대로 써라:
      ${RUN_DIR}/responses/<RESP_BASENAME>
-2. 파일 작성이 끝나면 화면(터미널)에 정확히 한 줄을 출력해라:
-     DONE <MSG_ID>
-3. 파일 외에 추가 가공/요약/박스 출력은 하지 마라.
-4. 파일이 이미 존재하면 덮어써라.
+2. 파일 작성이 끝나면 화면에 정확히 한 줄: DONE <MSG_ID>
+3. 파일 외 가공/요약/박스 출력 금지. 이미 있으면 덮어써라.
 
-  RESP_BASENAME = <agent>-r<NN>-a<N>.md   (예: codex-r03-a1.md)
+  RESP_BASENAME = <agent>-r<NN>-a<N>.md
   MSG_ID        = run-<run-id>-r<NN>-<agent>-a<N>
+```
 
-[screen 모드 — gemini]
-파일에 쓰지 마라. WriteFile/Shell 같은 도구를 사용하지 마라.
-화면(터미널)에 아래 형식으로 정확히 한 번만 출력하라.
+[screen — gemini용]
+```
+═══ Transport ═══
+파일에 쓰지 마라. WriteFile/Shell 도구 사용 금지.
+화면에 정확히 한 번만:
 
   CROSSTALK_BEGIN <MSG_ID>
   <답변 본문 한 단락>
   CROSSTALK_END <MSG_ID>
 
-그 외 텍스트(요약, 박스, 진행 상황, 추가 설명)는 출력하지 마라.
-같은 답변을 여러 번 출력하지 마라. END 마커 한 번이 답변 끝.
-
+다른 텍스트 출력 금지. 같은 답변 여러 번 출력 금지.
   MSG_ID = run-<run-id>-r<NN>-gemini-a<N>
-
-(bridge가 BEGIN/END 사이를 자동으로 추출해 응답 파일로 저장한다.)
-
-[지금까지의 논의 요약]
-- 턴 N-1 ...
-
-[이번 턴 사회자 메시지]
-<Claude가 종합한 논점 또는 직전 답변에 대한 반론>
 ```
 
 ### 전송 + 대기 흐름
 
-각 참여자(`peer`, `kind`)에게 한 턴 보낼 때:
+각 참여자(`peer`, `kind`)에게 한 턴 보낼 때, `TRANSPORT_OPTION` 값에 따라 다른 흐름:
 
 ```bash
 ROUND=N                  # 턴/라운드 번호
-ATTEMPT=1                # 재시도 시 +1
 AGENT="$kind"            # codex / gemini / claude (peer 쪽)
 
-MSG_ID=$(~/.claude/scripts/crosstalk_bridge.sh make-msg-id "$RUN_ID" "$ROUND" "$AGENT" "$ATTEMPT")
-RESP_BASENAME="${AGENT}-r$(printf '%02d' "$ROUND")-a${ATTEMPT}.md"
-
-# 메시지 안의 <RESP_BASENAME> / <MSG_ID> 자리표시자를 위 값들로 치환해서 전송
-~/.claude/scripts/crosstalk_bridge.sh send "$peer" "<치환된 메시지>"
-
-# agent별 MAX_WAIT + transport 모드 차등.
-# - gemini: agentic CLI라 "파일에 써라"를 시키면 WriteFile 툴을 호출하고 diff/승인 로그가 화면에 떠 transport가 깨진다.
-#           대신 screen 모드 — 화면에 BEGIN/END 블록만 출력하게 하고 bridge가 추출해 파일로 저장.
-# - claude/codex: 파일 직접 쓰는 file 모드 (현행).
+# agent별 MAX_WAIT (옵션 무관 공통)
 case "$AGENT" in
-  gemini) AGENT_MAX_WAIT=360; AGENT_TRANSPORT=screen ;;
-  codex)  AGENT_MAX_WAIT=240; AGENT_TRANSPORT=file   ;;
-  *)      AGENT_MAX_WAIT=180; AGENT_TRANSPORT=file   ;;
+  gemini) AGENT_MAX_WAIT=360 ;;
+  codex)  AGENT_MAX_WAIT=240 ;;
+  *)      AGENT_MAX_WAIT=180 ;;
 esac
 
-# 응답 파일이 안정될 때까지 대기 (DONE 마커 + 파일 안정 → clean / 파일만 안정 → soft-complete)
-STABLE_SECONDS=5 MAX_WAIT="$AGENT_MAX_WAIT" DONE_GRACE=5 \
-ACTIVITY_GRACE=30 ACTIVITY_EXTEND_BY=60 ACTIVITY_EXTEND_MAX=3 \
-TRANSPORT_MODE="$AGENT_TRANSPORT" \
-  ~/.claude/scripts/crosstalk_bridge.sh wait-turn "$peer" "$RUN_ID" "$MSG_ID" 2> /tmp/crosstalk_state
+if [ "$TRANSPORT_OPTION" = "off" ]; then
+  # ───── 기본 흐름: 화면 캡처. 사회자가 직접 읽는다. ─────
+  # 보내기 전에 현재 화면 라인 수 기록 → 답변 후 새로 추가된 줄만 추출
+  PREV_LINES=$(~/.claude/scripts/crosstalk_bridge.sh lines "$peer")
+
+  ~/.claude/scripts/crosstalk_bridge.sh send "$peer" "<메시지>"
+
+  # 화면이 안정될 때까지 대기 (legacy wait — 활동 감지 + 안정 시점)
+  STABLE_SECONDS=5 MAX_WAIT="$AGENT_MAX_WAIT" \
+    ~/.claude/scripts/crosstalk_bridge.sh wait "$peer" "$PREV_LINES" 2>/dev/null \
+    > /tmp/crosstalk_resp_raw
+
+  # raw 화면 텍스트 → 사회자(Claude)가 본문만 추출. CLI 박스, 진행 표시(✦/⏵), 푸터, 사용자 프롬프트 라인 등을 무시하고 답변 단락만 정리.
+  # (Claude 본인이 LLM이므로 후처리 잘 함. 별도 마커 불필요.)
+else
+  # ───── 옵션 흐름: file / screen transport ─────
+  ATTEMPT=1
+  MSG_ID=$(~/.claude/scripts/crosstalk_bridge.sh make-msg-id "$RUN_ID" "$ROUND" "$AGENT" "$ATTEMPT")
+  RESP_BASENAME="${AGENT}-r$(printf '%02d' "$ROUND")-a${ATTEMPT}.md"
+
+  # gemini는 agentic CLI라 file 모드 시키면 WriteFile 사고 → screen 강제. 그 외는 file.
+  if [ "$TRANSPORT_OPTION" = "screen" ] || [ "$AGENT" = "gemini" ]; then
+    AGENT_TRANSPORT=screen
+  else
+    AGENT_TRANSPORT=file
+  fi
+
+  ~/.claude/scripts/crosstalk_bridge.sh send "$peer" "<치환된 메시지>"
+
+  STABLE_SECONDS=5 MAX_WAIT="$AGENT_MAX_WAIT" DONE_GRACE=5 \
+  ACTIVITY_GRACE=30 ACTIVITY_EXTEND_BY=60 ACTIVITY_EXTEND_MAX=3 \
+  TRANSPORT_MODE="$AGENT_TRANSPORT" \
+    ~/.claude/scripts/crosstalk_bridge.sh wait-turn "$peer" "$RUN_ID" "$MSG_ID" 2> /tmp/crosstalk_state
+fi
 WAIT_RC=$?
 STATE_LINE=$(cat /tmp/crosstalk_state)
 
@@ -299,6 +361,10 @@ MAX_RESPONSE_BYTES=20000 \
 ```
 
 ### 상태별 처리
+
+**`TRANSPORT_OPTION=off` (기본)**: state 없음. 화면 캡처 후 사회자가 후처리. 답변이 비었거나 노이즈만 있으면 사회자가 *답변 누락 / 재요청* 결정.
+
+**`file`/`screen` 옵션**: 아래 표 적용.
 
 `wait-turn`은 stderr에 `STATE: <state> ...`를 한 줄 출력한다. exit code:
 - `clean`, `soft-complete` → 0
