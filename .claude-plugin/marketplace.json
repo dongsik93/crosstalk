@@ -5,13 +5,13 @@
   },
   "metadata": {
     "description": "Multi-agent AI debate via cmux split panes — Claude/Codex/Gemini를 한 명령으로 토론시키는 슬래시 커맨드 모음.",
-    "version": "0.1.1"
+    "version": "0.1.2"
   },
   "plugins": [
     {
       "name": "crosstalk",
       "description": "cmux 기반 다중 AI 토론 슬래시 커맨드 (debate / review / setup / launch / install).",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "author": {
         "name": "dongsik93"
       },
