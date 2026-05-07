@@ -1,5 +1,5 @@
 ---
-description: cmux의 다른 AI pane(Codex/Gemini)들과 자동 토론. 1:1 또는 다자(Claude 사회자) 모드. 한쪽이 [AGREE] 표시 또는 15턴까지. --rules / --persona 옵션 지원.
+description: Run a Crosstalk debate with peer AI CLI panes. Supports en/ko UI, rules, and personas.
 allowed-tools: Bash, AskUserQuestion, Read
 argument-hint: [--rules <name>] [--persona <name>] <토론 주제>
 ---
@@ -34,6 +34,8 @@ cmux 안에서 분할된 다른 AI CLI(Codex/Gemini)들과 자동으로 토론�
 옵션 없으면 active 프리셋 로드:
 ```bash
 CONFIG=~/.claude/crosstalk/config.json
+LANGUAGE=$(jq -r '.language // "en"' "$CONFIG" 2>/dev/null || echo "en")
+case "$LANGUAGE" in en|ko) ;; *) LANGUAGE="en" ;; esac
 ACTIVE_RULES=$(jq -r '.active_rules // "default"' "$CONFIG" 2>/dev/null || echo "default")
 ACTIVE_PERSONA=$(jq -r '.active_persona // "default"' "$CONFIG" 2>/dev/null || echo "default")
 RULES_NAME="${RULES_NAME:-$ACTIVE_RULES}"
@@ -42,10 +44,18 @@ PERSONA_NAME="${PERSONA_NAME:-$ACTIVE_PERSONA}"
 
 룰/페르소나 본문 Read:
 ```bash
-RULES_PATH=~/.claude/crosstalk/rules/${RULES_NAME}.md
-PERSONA_PATH=~/.claude/crosstalk/personas/${PERSONA_NAME}.md
-[ ! -f "$RULES_PATH" ] && echo "❌ 룰 '$RULES_NAME' 없음 — /crosstalk:rules 확인" && exit 1
-[ ! -f "$PERSONA_PATH" ] && echo "❌ 페르소나 '$PERSONA_NAME' 없음 — /crosstalk:persona 확인" && exit 1
+RULES_PATH=~/.claude/crosstalk/rules/${LANGUAGE}/${RULES_NAME}.md
+PERSONA_PATH=~/.claude/crosstalk/personas/${LANGUAGE}/${PERSONA_NAME}.md
+[ ! -f "$RULES_PATH" ] && RULES_PATH=~/.claude/crosstalk/rules/en/${RULES_NAME}.md
+[ ! -f "$PERSONA_PATH" ] && PERSONA_PATH=~/.claude/crosstalk/personas/en/${PERSONA_NAME}.md
+if [ ! -f "$RULES_PATH" ]; then
+  [ "$LANGUAGE" = "ko" ] && echo "❌ 룰 '$RULES_NAME' 없음 — /crosstalk:rules 확인" || echo "❌ Rule '$RULES_NAME' not found — run /crosstalk:rules"
+  exit 1
+fi
+if [ ! -f "$PERSONA_PATH" ]; then
+  [ "$LANGUAGE" = "ko" ] && echo "❌ 페르소나 '$PERSONA_NAME' 없음 — /crosstalk:persona 확인" || echo "❌ Persona '$PERSONA_NAME' not found — run /crosstalk:persona"
+  exit 1
+fi
 ```
 
 Read 도구로 두 파일 본문 메모리에 로드. 이후 모든 토론 메시지에 주입.
@@ -68,9 +78,22 @@ Read 도구로 두 파일 본문 메모리에 로드. 이후 모든 토론 메�
   cmux ping >/dev/null 2>&1 && CMUX_OK=true || CMUX_OK=false
   ```
 
-  - `CMUX_OK=false` → cmux 미실행/미설치. *cmux를 먼저 띄우거나 `/crosstalk:launch`를 외부에서 실행해야 한다* 안내 후 종료.
+  - `CMUX_OK=false` → cmux 미실행/미설치. 언어에 따라 안내 후 종료:
+    - en: Start cmux first, or run `/crosstalk:launch` outside cmux.
+    - ko: cmux를 먼저 띄우거나 `/crosstalk:launch`를 외부에서 실행해야 한다.
   - `CMUX_OK=true` → 사용자에게 명확히 안내 후 종료:
+    en:
+    ```text
+    🛑 No peer AI pane was found in the current cmux split.
+
+    Run these commands in order:
+      1. Set up panes:
+           /crosstalk:launch
+      2. Then retry:
+           /crosstalk <topic>   or   /crosstalk:debate <topic>
     ```
+    ko:
+    ```text
     🛑 cmux split 안에 다른 AI pane(Codex/Gemini)이 없어 토론을 시작할 수 없습니다.
 
     다음 순서로 다시 시도해주세요:
@@ -83,7 +106,12 @@ Read 도구로 두 파일 본문 메모리에 로드. 이후 모든 토론 메�
 
 ## 2단계: 사용자에게 상대 선택 받기
 
-`AskUserQuestion` 도구로 토론 상대 선택. 발견된 CLI 종류에 따라 옵션 동적 구성:
+`AskUserQuestion` 도구로 토론 상대 선택. 문구는 `LANGUAGE`에 따라 분기:
+
+- en: header `Debate peer`, question `Choose peer AI panes for this debate.`
+- ko: header `토론 상대`, question `토론할 AI pane을 선택하세요.`
+
+발견된 CLI 종류에 따라 옵션 동적 구성:
 
 - 각 CLI별 1:1 토론
 - 2개 이상이면 "전체 다자 토론(Claude 사회자)"
@@ -95,8 +123,24 @@ Read 도구로 두 파일 본문 메모리에 로드. 이후 모든 토론 메�
 
 ## 3단계: 안전 모드 프리앰블
 
-선택된 모든 참여자에게 한 번씩 프리앰블 메시지 전송:
+선택된 모든 참여자에게 한 번씩 프리앰블 메시지 전송. `LANGUAGE=en`이면 영어, `LANGUAGE=ko`이면 한국어를 사용한다. Transport 핵심 지시는 매 턴 영어로 고정한다.
 
+en:
+```
+[Crosstalk safe mode]
+
+We will debate this topic: <topic>
+
+Rules:
+1. Reply with one paragraph of text opinion only.
+2. Do not modify files, run shell commands, or call external APIs.
+   One exception: each turn's Transport section may allow writing exactly one response file.
+   Do not touch any other file or directory.
+3. If you agree, end with [AGREE]. If not, end with [DISAGREE: reason].
+4. Wait for the first debate turn. Do not answer this preamble.
+```
+
+ko:
 ```
 [Claude 주관 토론 안전 모드 시작]
 
@@ -209,8 +253,18 @@ RESP_BASENAME="${AGENT}-r$(printf '%02d' "$ROUND")-a${ATTEMPT}.md"
 # 메시지 안의 <RESP_BASENAME> / <MSG_ID> 자리표시자를 위 값들로 치환해서 전송
 ~/.claude/scripts/crosstalk_bridge.sh send "$peer" "<치환된 메시지>"
 
+# agent별 MAX_WAIT 차등 — gemini는 응답 시작이 늦은 케이스가 잦아 더 길게 잡는다.
+# wait-turn은 ACTIVITY_GRACE 안에 활동(화면 변화/파일 갱신)이 있으면 자동 연장하므로
+# 아래 값은 "최소 대기" 기준. 실제로는 활동 살아있는 한 더 기다린다.
+case "$AGENT" in
+  gemini) AGENT_MAX_WAIT=360 ;;
+  codex)  AGENT_MAX_WAIT=240 ;;
+  *)      AGENT_MAX_WAIT=180 ;;
+esac
+
 # 응답 파일이 안정될 때까지 대기 (DONE 마커 + 파일 안정 → clean / 파일만 안정 → soft-complete)
-STABLE_SECONDS=5 MAX_WAIT=180 DONE_GRACE=5 \
+STABLE_SECONDS=5 MAX_WAIT="$AGENT_MAX_WAIT" DONE_GRACE=5 \
+ACTIVITY_GRACE=30 ACTIVITY_EXTEND_BY=60 ACTIVITY_EXTEND_MAX=3 \
   ~/.claude/scripts/crosstalk_bridge.sh wait-turn "$peer" "$RUN_ID" "$MSG_ID" 2> /tmp/crosstalk_state
 WAIT_RC=$?
 STATE_LINE=$(cat /tmp/crosstalk_state)
@@ -231,9 +285,11 @@ MAX_RESPONSE_BYTES=20000 \
 | `clean` | 정상. 파일 내용을 답변으로 사용. |
 | `soft-complete` | 파일은 받았지만 DONE 마커 못 봄. 파일 내용 사용 + 화면 표시에 ⚠️ "DONE 마커 누락" 한 줄 노출. |
 | `protocol-error` | DONE 마커는 봤는데 파일이 없거나 비어있음. 사용자에게 *재시도(ATTEMPT+1) / 무시 / 중단* `AskUserQuestion`. 재시도 시 메시지 끝에 *직전 시도가 파일을 만들지 않았다, 위 RESP_BASENAME에 정확히 써달라* 한 줄 추가. |
-| `timeout` | MAX_WAIT 초과. 사용자에게 *재시도 / 무시(부분 종합 진행) / 중단* `AskUserQuestion`. |
+| `timeout` | MAX_WAIT(+ 활동 기반 자동 연장 한도) 초과. 사용자에게 *조금 더 기다리기(MAX_WAIT 추가) / 재시도(ATTEMPT+1) / 무시(부분 종합) / 중단* `AskUserQuestion`. **재시도 전에 직전 attempt 응답 파일이 *나중에 도착해서* 두 답변이 동시에 떠다니는 케이스를 항상 안내**. |
 
 INTERVENTION/prompt-count 휴리스틱은 v0.1.4부터 사용하지 않는다 (파일 마커가 진실). 사용자가 옆 pane에 끼어들었더라도 답변 파일이 정상 도착했으면 그대로 신뢰한다.
+
+`wait-turn`은 화면/응답 파일에 변화가 *최근 ACTIVITY_GRACE 초 안에* 있으면 `MAX_WAIT` 도달 시점에 자동으로 `ACTIVITY_EXTEND_BY` 만큼 연장한다 (최대 `ACTIVITY_EXTEND_MAX` 회). 즉 Gemini처럼 답변 시작이 늦어도 *살아있는 한* 강제 timeout 시키지 않는다. extension이 stderr에 `INFO: activity detected near deadline...` 으로 표시되면 진행 표시도 *기다리는 중* 로 갱신.
 
 ### 종료 조건
 
@@ -244,14 +300,21 @@ INTERVENTION/prompt-count 휴리스틱은 v0.1.4부터 사용하지 않는다 (�
 
 매 턴/라운드:
 
-**1:1**:
+`LANGUAGE=en`:
+```text
+━━━ Turn N/15 ━━━
+Claude (me): <paragraph>
+<CLI>: <paragraph>
+```
+
+`LANGUAGE=ko` 1:1:
 ```
 ━━━ Turn N/15 ━━━
 🟦 Claude (나): <한 단락>
 🟧 <CLI>: <한 단락>
 ```
 
-**다자**:
+`LANGUAGE=ko` 다자:
 ```
 ━━━ Round N/10 ━━━
 🟦 Claude (나): <한 단락>
@@ -291,8 +354,16 @@ cmux 명령 결과/raw 출력은 노출 금지. 대화 내용만.
 
 ## 9단계: 로그 + transport run 보관/폐기 질문
 
-`AskUserQuestion`으로:
+`AskUserQuestion`으로 언어별 질문:
 ```
+en:
+header: Debate log
+question: Keep this debate log? (includes raw response files)
+options:
+  - Keep (~/Documents/crosstalk/<date>-<topic-slug>/)
+  - Discard (delete LOG_TMP and transport run directory)
+
+ko:
 header: 토론 로그
 question: 이번 토론 로그를 보관할까요? (응답 원문 파일 포함)
 options:

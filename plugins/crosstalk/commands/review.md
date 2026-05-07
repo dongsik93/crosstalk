@@ -1,5 +1,5 @@
 ---
-description: PR을 cmux의 다른 AI(Codex/Gemini)들과 함께 리뷰. 빠른 모드(diff 공유) 또는 깊은 모드(--deep, experimental — 현재 디렉토리를 PR 브랜치로 checkout). --rules / --persona 옵션 지원.
+description: Review a GitHub PR with peer AI CLI panes. Supports en/ko UI. Deep mode is experimental.
 allowed-tools: Bash, AskUserQuestion, Read
 argument-hint: [--deep] [--rules <name>] [--persona <name>] [PR번호]
 ---
@@ -63,14 +63,24 @@ fi
 
 # 옵션 미지정 시 active 프리셋
 CONFIG=~/.claude/crosstalk/config.json
+LANGUAGE=$(jq -r '.language // "en"' "$CONFIG" 2>/dev/null || echo "en")
+case "$LANGUAGE" in en|ko) ;; *) LANGUAGE="en" ;; esac
 RULES_NAME="${RULES_NAME:-$(jq -r '.active_rules // "default"' "$CONFIG" 2>/dev/null || echo "default")}"
 PERSONA_NAME="${PERSONA_NAME:-$(jq -r '.active_persona // "default"' "$CONFIG" 2>/dev/null || echo "default")}"
 
 # 룰/페르소나 본문 검증
-RULES_PATH=~/.claude/crosstalk/rules/${RULES_NAME}.md
-PERSONA_PATH=~/.claude/crosstalk/personas/${PERSONA_NAME}.md
-[ ! -f "$RULES_PATH" ] && echo "❌ 룰 '$RULES_NAME' 없음 — /crosstalk:rules 확인" && exit 1
-[ ! -f "$PERSONA_PATH" ] && echo "❌ 페르소나 '$PERSONA_NAME' 없음 — /crosstalk:persona 확인" && exit 1
+RULES_PATH=~/.claude/crosstalk/rules/${LANGUAGE}/${RULES_NAME}.md
+PERSONA_PATH=~/.claude/crosstalk/personas/${LANGUAGE}/${PERSONA_NAME}.md
+[ ! -f "$RULES_PATH" ] && RULES_PATH=~/.claude/crosstalk/rules/en/${RULES_NAME}.md
+[ ! -f "$PERSONA_PATH" ] && PERSONA_PATH=~/.claude/crosstalk/personas/en/${PERSONA_NAME}.md
+if [ ! -f "$RULES_PATH" ]; then
+  [ "$LANGUAGE" = "ko" ] && echo "❌ 룰 '$RULES_NAME' 없음 — /crosstalk:rules 확인" || echo "❌ Rule '$RULES_NAME' not found — run /crosstalk:rules"
+  exit 1
+fi
+if [ ! -f "$PERSONA_PATH" ]; then
+  [ "$LANGUAGE" = "ko" ] && echo "❌ 페르소나 '$PERSONA_NAME' 없음 — /crosstalk:persona 확인" || echo "❌ Persona '$PERSONA_NAME' not found — run /crosstalk:persona"
+  exit 1
+fi
 
 # PR 번호
 PR_NUM=$(echo "$ARGS" | tr -d '[:space:]')
@@ -78,7 +88,7 @@ if [ -z "$PR_NUM" ]; then
   PR_NUM=$(gh pr view --json number --jq .number 2>/dev/null || echo "")
 fi
 if [ -z "$PR_NUM" ]; then
-  echo "ERROR: PR 번호를 찾을 수 없습니다."
+  [ "$LANGUAGE" = "ko" ] && echo "ERROR: PR 번호를 찾을 수 없습니다." || echo "ERROR: Could not find PR number."
   exit 1
 fi
 
@@ -96,7 +106,19 @@ HAS_CHANGES=false
 [ -n "$(git status --porcelain)" ] && HAS_CHANGES=true
 ```
 
-`AskUserQuestion`:
+`AskUserQuestion`은 언어별로 표시:
+
+en:
+```
+header: Deep mode warning
+question: Deep mode checks out PR #${PR_NUM} in the current working directory.
+options:
+  - Continue
+  - Switch to fast mode
+  - Cancel
+```
+
+ko:
 ```
 header: 깊은 모드 주의사항
 question: 깊은 모드는 현재 작업 디렉토리를 PR #${PR_NUM} 브랜치로 갈아탑니다.
@@ -125,7 +147,11 @@ DIFF_PATH="/tmp/pr-${PR_NUM}-$(date +%Y%m%d-%H%M%S).diff"
 gh pr diff "$PR_NUM" > "$DIFF_PATH"
 DIFF_LINES=$(wc -l < "$DIFF_PATH" | tr -d ' ')
 SHARED_LABEL="diff 파일: $DIFF_PATH ($DIFF_LINES lines)"
-SHARED_INSTR="이 diff 파일을 너의 환경에서 직접 읽어 분석해주세요."
+if [ "$LANGUAGE" = "ko" ]; then
+  SHARED_INSTR="이 diff 파일을 너의 환경에서 직접 읽어 분석해주세요."
+else
+  SHARED_INSTR="Read this diff file in your environment and review it directly."
+fi
 ```
 
 ### 깊은 모드 (이 단계에서는 diff만 받는다 — checkout/stash는 4단계 뒤로 미룬다)
@@ -185,7 +211,11 @@ if [ "$MODE" = "deep" ]; then
   }
   CURRENT_DIR=$(pwd)
   SHARED_LABEL="현재 디렉토리: $CURRENT_DIR (PR 브랜치 체크아웃됨), diff 참조: $DIFF_PATH"
-  SHARED_INSTR="현재 디렉토리($CURRENT_DIR)가 PR 브랜치입니다. grep/find/read로 자유롭게 분석. 코드 수정/커밋/git 작업 금지. 단, 매 턴 메시지의 ═══ Transport ═══ 섹션이 지정한 응답 파일 1개 작성은 허용된다 (정확한 경로/파일명은 그 섹션이 알려준다)."
+  if [ "$LANGUAGE" = "ko" ]; then
+    SHARED_INSTR="현재 디렉토리($CURRENT_DIR)가 PR 브랜치입니다. grep/find/read로 자유롭게 분석. 코드 수정/커밋/git 작업 금지. 단, 매 턴 메시지의 ═══ Transport ═══ 섹션이 지정한 응답 파일 1개 작성은 허용된다 (정확한 경로/파일명은 그 섹션이 알려준다)."
+  else
+    SHARED_INSTR="The current directory ($CURRENT_DIR) is checked out to the PR branch. You may inspect files freely, but do not modify code, commit, or run git operations. The only allowed write is the response file specified by each turn's Transport section."
+  fi
 
   restore_branch() {
     git checkout "$ORIG_BRANCH" 2>/dev/null || {
@@ -276,9 +306,14 @@ ${SHARED_INSTR}
 마지막 줄에 [REVIEW_DONE] 마커.
 ```
 
-전송 + 답변 대기 (파일 기반 transport, `MAX_WAIT`은 모드별):
-- fast: `STABLE_SECONDS=8 MAX_WAIT=600 DONE_GRACE=5`
-- deep: `STABLE_SECONDS=12 MAX_WAIT=1800 DONE_GRACE=5`
+전송 + 답변 대기 (파일 기반 transport, `MAX_WAIT`은 모드 + agent별 조합):
+
+| 모드 \ agent | claude/codex 기본 | gemini |
+|---|---|---|
+| fast | 600s | 900s |
+| deep | 1800s | 2400s |
+
+활동 감지(`ACTIVITY_GRACE=30 ACTIVITY_EXTEND_BY=120 ACTIVITY_EXTEND_MAX=3`)로 *살아있는 한* 자동 연장. 위 값은 "최소 대기" 기준.
 
 ```bash
 ATTEMPT=1
@@ -290,7 +325,12 @@ RESP_BASENAME="${AGENT}-r01-a${ATTEMPT}.md"
 ~/.claude/scripts/crosstalk_bridge.sh send "$peer" "<치환된 메시지>"
 
 # wait-turn: stderr에 STATE 라인, exit code로 성공/실패
-STABLE_SECONDS=8 MAX_WAIT=600 DONE_GRACE=5 \
+case "$AGENT" in
+  gemini) AGENT_MAX_WAIT=$([ "$MODE" = "deep" ] && echo 2400 || echo 900) ;;
+  *)      AGENT_MAX_WAIT=$([ "$MODE" = "deep" ] && echo 1800 || echo 600) ;;
+esac
+STABLE_SECONDS=8 MAX_WAIT="$AGENT_MAX_WAIT" DONE_GRACE=5 \
+ACTIVITY_GRACE=30 ACTIVITY_EXTEND_BY=120 ACTIVITY_EXTEND_MAX=3 \
   ~/.claude/scripts/crosstalk_bridge.sh wait-turn "$peer" "$RUN_ID" "$MSG_ID" 2> /tmp/crosstalk_state
 WAIT_RC=$?
 STATE_LINE=$(cat /tmp/crosstalk_state)
@@ -352,7 +392,7 @@ PR: #${PR_NUM} <title>
 <Claude가 종합한 논점>
 ```
 
-전송 흐름은 `/crosstalk:debate`와 동일 (`make-msg-id` → `send` → `wait-turn` → `read-response`, `STABLE_SECONDS=5 MAX_WAIT=180 DONE_GRACE=5`).
+전송 흐름은 `/crosstalk:debate`와 동일 (`make-msg-id` → `send` → `wait-turn` → `read-response`). agent별 `MAX_WAIT` + `ACTIVITY_GRACE/EXTEND_BY/EXTEND_MAX` 차등도 동일 — 라운드 토론은 debate와 같은 기본값(`gemini=360 / codex=240 / claude=180`, `ACTIVITY_GRACE=30 ACTIVITY_EXTEND_BY=60`).
 
 ## 8단계: 종합
 

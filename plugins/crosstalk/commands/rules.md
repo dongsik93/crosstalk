@@ -1,5 +1,5 @@
 ---
-description: 토론 룰 프리셋 관리 — 전환/생성/편집/삭제. 빌트인 default/brainstorm/debate + 사용자 커스텀.
+description: Manage debate rule presets for the selected interface language.
 allowed-tools: Bash, AskUserQuestion, Read
 argument-hint: (인자 없음)
 ---
@@ -12,10 +12,12 @@ argument-hint: (인자 없음)
 
 ```bash
 CONFIG=~/.claude/crosstalk/config.json
-RULES_DIR=~/.claude/crosstalk/rules
+LANGUAGE=$(jq -r '.language // "en"' "$CONFIG" 2>/dev/null || echo "en")
+case "$LANGUAGE" in en|ko) ;; *) LANGUAGE="en" ;; esac
+RULES_DIR=~/.claude/crosstalk/rules/${LANGUAGE}
 
 if [ ! -d "$RULES_DIR" ]; then
-  echo "❌ Crosstalk 셋업이 안 되어 있습니다. /crosstalk:install 먼저 실행."
+  [ "$LANGUAGE" = "ko" ] && echo "❌ Crosstalk 셋업이 안 되어 있습니다. /crosstalk:install 먼저 실행." || echo "❌ Crosstalk is not installed. Run /crosstalk:install first."
   exit 1
 fi
 
@@ -26,8 +28,19 @@ AVAILABLE=$(ls "$RULES_DIR"/*.md 2>/dev/null | xargs -n1 basename | sed 's/\.md$
 ## 2단계: 메뉴 표시 (AskUserQuestion)
 
 ```
+en:
+header: Rules
+question: Current active rules preset: ${ACTIVE} (language: ${LANGUAGE})
+options:
+  - Switch rules
+  - Create new rules preset
+  - Edit current rules (${ACTIVE})
+  - Delete rules
+  - Cancel
+
+ko:
 header: 토론 룰 관리
-question: 현재 active 룰: ${ACTIVE}
+question: 현재 active 룰: ${ACTIVE} (언어: ${LANGUAGE})
 
 options:
   - 다른 룰로 전환
@@ -46,7 +59,7 @@ options:
 ```bash
 # 선택 후
 jq --arg name "$NEW_NAME" '.active_rules = $name' "$CONFIG" > "$CONFIG.tmp" && mv "$CONFIG.tmp" "$CONFIG"
-echo "✅ active 룰: $NEW_NAME"
+[ "$LANGUAGE" = "ko" ] && echo "✅ active 룰: $NEW_NAME" || echo "✅ Active rules: $NEW_NAME"
 ```
 
 ### 새 룰 만들기
@@ -56,8 +69,8 @@ echo "✅ active 룰: $NEW_NAME"
 NEW_NAME="<사용자 입력>"
 
 # 검증
-[[ "$NEW_NAME" =~ ^[a-z0-9-]+$ ]] || { echo "❌ 영문 소문자/숫자/하이픈만 허용"; exit 1; }
-[ -f "$RULES_DIR/$NEW_NAME.md" ] && { echo "❌ 이미 존재"; exit 1; }
+[[ "$NEW_NAME" =~ ^[a-z0-9-]+$ ]] || { [ "$LANGUAGE" = "ko" ] && echo "❌ 영문 소문자/숫자/하이픈만 허용" || echo "❌ Use lowercase letters, numbers, and hyphens only"; exit 1; }
+[ -f "$RULES_DIR/$NEW_NAME.md" ] && { [ "$LANGUAGE" = "ko" ] && echo "❌ 이미 존재" || echo "❌ Already exists"; exit 1; }
 
 # default 복사
 cp "$RULES_DIR/default.md" "$RULES_DIR/$NEW_NAME.md"
@@ -65,15 +78,15 @@ cp "$RULES_DIR/default.md" "$RULES_DIR/$NEW_NAME.md"
 # 편집기 열기
 ${EDITOR:-vi} "$RULES_DIR/$NEW_NAME.md"
 
-echo "✅ 새 룰 생성: $NEW_NAME"
-echo "   active로 전환하려면: /crosstalk:rules → 다른 룰로 전환"
+[ "$LANGUAGE" = "ko" ] && echo "✅ 새 룰 생성: $NEW_NAME" || echo "✅ Created rules preset: $NEW_NAME"
+[ "$LANGUAGE" = "ko" ] && echo "   active로 전환하려면: /crosstalk:rules → 다른 룰로 전환" || echo "   To activate it: /crosstalk:rules → Switch rules"
 ```
 
 ### 편집
 
 ```bash
 ${EDITOR:-vi} "$RULES_DIR/$ACTIVE.md"
-echo "✅ 편집 완료: $ACTIVE"
+[ "$LANGUAGE" = "ko" ] && echo "✅ 편집 완료: $ACTIVE" || echo "✅ Edited: $ACTIVE"
 ```
 
 ### 삭제
@@ -87,9 +100,9 @@ echo "✅ 편집 완료: $ACTIVE"
 rm "$RULES_DIR/$NAME.md"
 if [ "$ACTIVE" = "$NAME" ]; then
   jq '.active_rules = "default"' "$CONFIG" > "$CONFIG.tmp" && mv "$CONFIG.tmp" "$CONFIG"
-  echo "ℹ️ active 룰을 default로 변경"
+  [ "$LANGUAGE" = "ko" ] && echo "ℹ️ active 룰을 default로 변경" || echo "ℹ️ Active rules reset to default"
 fi
-echo "✅ 삭제: $NAME"
+[ "$LANGUAGE" = "ko" ] && echo "✅ 삭제: $NAME" || echo "✅ Deleted: $NAME"
 ```
 
 ## 사용자 화면 표시
@@ -98,6 +111,7 @@ echo "✅ 삭제: $NAME"
 
 ## 주의사항
 
+- 현재 인터페이스 언어의 디렉토리(`~/.claude/crosstalk/rules/${LANGUAGE}`)만 관리
 - 빌트인 룰(default/brainstorm/debate) 삭제 시 다음 `/crosstalk:install`에서 복원됨
 - 룰 파일은 자유 마크다운 — 시스템이 메시지에 본문 그대로 주입
 - *시스템 규칙*([AGREE]/[DISAGREE])은 룰 파일과 무관 — 코드가 자동 추가

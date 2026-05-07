@@ -1,5 +1,5 @@
 ---
-description: Crosstalk 단독 명령 — 인자가 있으면 토론 주제로 사용해 debate 시작, 없으면 사용 가능 명령 안내. /crosstalk:install 으로 활성화됨.
+description: Crosstalk shortcut command. Uses selected en/ko interface language.
 allowed-tools: Bash, AskUserQuestion
 argument-hint: <토론 주제>
 ---
@@ -13,6 +13,33 @@ argument-hint: <토론 주제>
 ### 인자 비어있을 때
 다음과 같이 사용법 안내:
 
+언어 확인:
+```bash
+LANGUAGE=$(~/.claude/scripts/crosstalk_bridge.sh get-language 2>/dev/null || echo en)
+```
+
+`LANGUAGE=en`:
+```
+Crosstalk — multi-agent debate
+
+Usage:
+  /crosstalk <topic>                         Shortcut debate
+  /crosstalk:debate <topic>                  Explicit debate command
+  /crosstalk:debate --rules brainstorm <topic>
+  /crosstalk:debate --persona senior-junior <topic>
+
+PR review:
+  /crosstalk:review [PR]                     Fast PR review
+  /crosstalk:review --deep [PR]              Experimental deep PR review
+
+Setup:
+  /crosstalk:install
+  /crosstalk:launch
+  /crosstalk:setup
+  /crosstalk:status
+```
+
+`LANGUAGE=ko`:
 ```
 🗣️ Crosstalk — 다중 AI 토론
 
@@ -46,7 +73,7 @@ PR 리뷰:
 `/crosstalk:debate` 본문(플러그인의 `commands/debate.md`)을 그대로 따라 실행하되, 주제는 `$ARGUMENTS`.
 
 debate 1단계의 *peer 0개 → /crosstalk:launch 제안* 흐름이 그대로 적용된다.
-즉 cmux split 안에 다른 AI pane이 없으면 자동으로 launch 실행 여부를 묻는다.
+즉 cmux split 안에 다른 AI pane이 없으면 언어에 맞춰 `/crosstalk:launch` 실행 후 재호출 안내를 표시한다.
 
 ## 주의사항
 

@@ -36,6 +36,34 @@ Unlike headless multi-agent tools, Crosstalk keeps the work visible. You can wat
 
 You only need the AI CLIs you plan to use. `/crosstalk:install` can help install missing Codex and Gemini CLI packages through npm.
 
+## Language
+
+Crosstalk supports English and Korean command UI. During `/crosstalk:install`, choose the interface language:
+
+- English
+- Korean
+
+The setting is stored in:
+
+```text
+~/.claude/crosstalk/config.json
+```
+
+```json
+{
+  "active_rules": "default",
+  "active_persona": "default",
+  "language": "en"
+}
+```
+
+Use `"language": "ko"` for Korean. Built-in rules and personas are installed in both languages:
+
+```text
+~/.claude/crosstalk/rules/{en,ko}/
+~/.claude/crosstalk/personas/{en,ko}/
+```
+
 ## Installation
 
 In Claude Code:

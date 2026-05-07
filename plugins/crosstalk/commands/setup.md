@@ -1,5 +1,5 @@
 ---
-description: cmux 안의 모든 pane을 자동/수동으로 라벨링해서 /crosstalk 명령들이 안정적으로 동작하게 셋업.
+description: Label cmux panes for Crosstalk detection. User-facing prompts support en/ko.
 allowed-tools: Bash, AskUserQuestion
 argument-hint: (인자 없음)
 ---
@@ -29,6 +29,10 @@ argument-hint: (인자 없음)
 ## 1단계: 환경 스캔
 
 ```bash
+CONFIG=~/.claude/crosstalk/config.json
+LANGUAGE=$(jq -r '.language // "en"' "$CONFIG" 2>/dev/null || echo "en")
+case "$LANGUAGE" in en|ko) ;; *) LANGUAGE="en" ;; esac
+
 ~/.claude/scripts/crosstalk_bridge.sh list-all
 ```
 
@@ -44,7 +48,23 @@ argument-hint: (인자 없음)
 
 ## 3단계: 사용자 수동 선택 (C 그룹)
 
-각 unknown surface마다 `AskUserQuestion`:
+각 unknown surface마다 `AskUserQuestion`. `LANGUAGE=en`:
+
+```
+header: Label <surface_ref>
+question: Screen preview from <surface_ref>:
+<first 5-10 lines>
+
+Which process is running here?
+options:
+  - Claude Code
+  - Codex
+  - Gemini
+  - Shell / Other
+  - Skip
+```
+
+`LANGUAGE=ko`:
 
 ```
 header: <surface_ref> 라벨링
@@ -76,6 +96,22 @@ SELF=$(~/.claude/scripts/crosstalk_bridge.sh list-all | awk -F'\t' '$3=="self" {
 
 ## 5단계: 결과 표시
 
+`LANGUAGE=en`:
+```
+━━━ /crosstalk:setup complete ━━━
+
+Labeled panes:
+  surface:1  → claude (self)
+  surface:5  → gemini
+  surface:8  → codex
+
+You can now run:
+  /crosstalk <topic>
+  /crosstalk:debate <topic>
+  /crosstalk:review [PR]
+```
+
+`LANGUAGE=ko`:
 ```
 ━━━ /crosstalk:setup 완료 ━━━
 

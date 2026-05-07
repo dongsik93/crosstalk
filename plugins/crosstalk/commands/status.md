@@ -1,5 +1,5 @@
 ---
-description: 현재 active 룰/페르소나 + 사용 가능한 프리셋 목록 + cmux pane 라벨 상태를 한눈에 표시.
+description: Show current Crosstalk status, language, rules/personas, and cmux pane labels.
 allowed-tools: Bash, Read
 argument-hint: (인자 없음)
 ---
@@ -12,14 +12,16 @@ argument-hint: (인자 없음)
 
 ```bash
 CONFIG=~/.claude/crosstalk/config.json
-RULES_DIR=~/.claude/crosstalk/rules
-PERSONAS_DIR=~/.claude/crosstalk/personas
 
 if [ ! -f "$CONFIG" ]; then
-  echo "❌ Crosstalk 셋업이 안 되어 있습니다. /crosstalk:install 먼저 실행."
+  echo "❌ Crosstalk is not installed. Run /crosstalk:install first."
   exit 1
 fi
 
+LANGUAGE=$(jq -r '.language // "en"' "$CONFIG" 2>/dev/null || echo "en")
+case "$LANGUAGE" in en|ko) ;; *) LANGUAGE="en" ;; esac
+RULES_DIR=~/.claude/crosstalk/rules/${LANGUAGE}
+PERSONAS_DIR=~/.claude/crosstalk/personas/${LANGUAGE}
 ACTIVE_RULES=$(jq -r '.active_rules // "default"' "$CONFIG")
 ACTIVE_PERSONA=$(jq -r '.active_persona // "default"' "$CONFIG")
 
@@ -39,10 +41,46 @@ fi
 
 ## 3단계: 사용자에게 표시
 
+`LANGUAGE=en`:
+```text
+Crosstalk status
+
+[Current setup]
+  interface language: English
+  active rules:      ${ACTIVE_RULES}
+  active persona:    ${ACTIVE_PERSONA}
+
+[Available rules]
+  ✅ ${ACTIVE_RULES} (current)
+  - default
+  - brainstorm
+  - debate
+  - <custom presets>
+
+[Available personas]
+  ✅ ${ACTIVE_PERSONA} (current)
+  - default
+  - senior-junior
+  - critic-builder
+  - triple-perspective
+
+[cmux panes]
+  surface:1 → claude (self)
+  surface:4 → codex
+  or "not running inside cmux"
+
+[Start]
+  /crosstalk <topic>
+  /crosstalk --rules brainstorm <topic>
+  /crosstalk --persona senior-junior <topic>
 ```
+
+`LANGUAGE=ko`:
+```text
 🎭 Crosstalk 상태
 
 [현재 셋업]
+  인터페이스 언어: 한국어
   active 룰:      ${ACTIVE_RULES}
   active 페르소나: ${ACTIVE_PERSONA}
 
@@ -81,4 +119,5 @@ cmux 명령 raw 출력은 노출 X. 깔끔한 요약만.
 ## 주의사항
 
 - 읽기 전용 — 이 명령은 설정을 변경하지 않음
+- 언어별 프리셋 디렉토리(`rules/${LANGUAGE}`, `personas/${LANGUAGE}`)를 기준으로 표시
 - cmux 외부 호출 시 cmux pane 상태 섹션은 *외부에서 호출됨*으로 표시

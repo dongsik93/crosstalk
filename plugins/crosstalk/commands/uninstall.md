@@ -1,5 +1,5 @@
 ---
-description: Crosstalk가 사용자 홈에 설치한 컴포넌트(bridge, 단독 명령) 제거. 플러그인 자체 제거는 /plugin uninstall 사용.
+description: Remove user-level Crosstalk components. User-facing prompts support en/ko.
 allowed-tools: Bash, AskUserQuestion
 argument-hint: (인자 없음)
 ---
@@ -22,12 +22,16 @@ argument-hint: (인자 없음)
 ## 1단계: 제거 항목 확인
 
 ```bash
+CONFIG=~/.claude/crosstalk/config.json
+LANGUAGE=$(jq -r '.language // "en"' "$CONFIG" 2>/dev/null || echo "en")
+case "$LANGUAGE" in en|ko) ;; *) LANGUAGE="en" ;; esac
+
 ITEMS=()
 [ -f ~/.claude/scripts/crosstalk_bridge.sh ] && ITEMS+=("~/.claude/scripts/crosstalk_bridge.sh")
 [ -f ~/.claude/commands/crosstalk.md ] && ITEMS+=("~/.claude/commands/crosstalk.md")
 
 if [ ${#ITEMS[@]} -eq 0 ]; then
-  echo "ℹ️ 제거할 Crosstalk 컴포넌트가 없습니다."
+  [ "$LANGUAGE" = "ko" ] && echo "ℹ️ 제거할 Crosstalk 컴포넌트가 없습니다." || echo "ℹ️ No Crosstalk components found."
   exit 0
 fi
 ```
@@ -43,6 +47,14 @@ fi
 
 `AskUserQuestion`:
 ```
+en:
+header: Confirm removal
+question: Remove the listed Crosstalk components? npm packages, cmux, logs, and the marketplace plugin are kept.
+options:
+  - Remove
+  - Cancel
+
+ko:
 header: 제거 확인
 question: 위 항목을 제거하시겠습니까? (npm 패키지/cmux/플러그인 자체는 유지됩니다)
 options:
@@ -59,7 +71,21 @@ rm -f ~/.claude/commands/crosstalk.md
 
 ## 4단계: 결과 안내
 
+en:
+```text
+✅ Crosstalk components removed.
+
+To remove the marketplace plugin itself:
+  /plugin uninstall crosstalk
+
+These remain installed unless removed manually:
+  - npm packages: claude / codex / gemini
+  - cmux
+  - logs: ~/Documents/crosstalk/
 ```
+
+ko:
+```text
 ✅ Crosstalk 컴포넌트 제거 완료.
 
 플러그인 자체를 제거하려면:

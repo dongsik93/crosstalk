@@ -31,6 +31,7 @@
 #                                                  env: READY_MAX_WAIT(기본 20), READY_INTERVAL(기본 2)
 #   crosstalk_bridge.sh stop <surface>             → Ctrl+C 전송 (긴급 정지)
 #   crosstalk_bridge.sh save <path> <text>         → 토론 로그를 마크다운 파일에 append
+#   crosstalk_bridge.sh get-language               → ~/.claude/crosstalk/config.json 의 language(en/ko) 출력
 #
 # v0.1.4 file-based transport:
 #   crosstalk_bridge.sh start-run                       → 새 run-id 생성, /tmp/crosstalk/run-<id>/ 디렉토리 + manifest.json 생성
@@ -330,6 +331,15 @@ case "$CMD" in
     cmux send-key --surface "$SURFACE" c-c >/dev/null
     ;;
 
+  get-language)
+    CONFIG="${CROSSTALK_CONFIG:-$HOME/.claude/crosstalk/config.json}"
+    LANG_VALUE=$(jq -r '.language // "en"' "$CONFIG" 2>/dev/null || echo "en")
+    case "$LANG_VALUE" in
+      en|ko) echo "$LANG_VALUE" ;;
+      *) echo "en" ;;
+    esac
+    ;;
+
   wait-ready)
     # 라벨 무시. 화면 푸터 패턴만으로 expected-kind와 일치하는지 확인.
     # 일치 → ready (exit 0). OAuth/로그인 화면 감지 → auth-needed (exit 2). 시간 초과 → timeout (exit 1).
@@ -426,9 +436,18 @@ EOF
     STABLE_SECONDS="${STABLE_SECONDS:-5}"
     MAX_WAIT="${MAX_WAIT:-300}"
     DONE_GRACE="${DONE_GRACE:-5}"
+    # 활동 감지: 화면 변화 / 응답 파일 변화가 최근 ACTIVITY_GRACE 초 안에 있으면 살아있다고 간주.
+    # MAX_WAIT 초과 직전에 활동이 살아있으면 ACTIVITY_EXTEND_BY 만큼 추가 대기 (최대 ACTIVITY_EXTEND_MAX 회).
+    # 0으로 두면 활동 감지 비활성 (기존 동작과 동일).
+    ACTIVITY_GRACE="${ACTIVITY_GRACE:-30}"
+    ACTIVITY_EXTEND_BY="${ACTIVITY_EXTEND_BY:-60}"
+    ACTIVITY_EXTEND_MAX="${ACTIVITY_EXTEND_MAX:-3}"
     validate_positive_int "$STABLE_SECONDS" "STABLE_SECONDS" || exit 1
     validate_positive_int "$MAX_WAIT" "MAX_WAIT" || exit 1
     validate_nonnegative_int "$DONE_GRACE" "DONE_GRACE" || exit 1
+    validate_nonnegative_int "$ACTIVITY_GRACE" "ACTIVITY_GRACE" || exit 1
+    validate_nonnegative_int "$ACTIVITY_EXTEND_BY" "ACTIVITY_EXTEND_BY" || exit 1
+    validate_nonnegative_int "$ACTIVITY_EXTEND_MAX" "ACTIVITY_EXTEND_MAX" || exit 1
 
     # run dir이 없으면 즉시 에러 (start-run 안 거치고 호출된 경우)
     RUN_DIR="$CROSSTALK_ROOT/run-$RUN_ID"
@@ -467,28 +486,56 @@ EOF
     ELAPSED=0
     DONE_SEEN=0
     DONE_AT=0
+    # 활동 감지 상태
+    PREV_SCREEN_HASH=""
+    LAST_ACTIVITY=0          # 마지막으로 변화 감지된 ELAPSED 값
+    EFFECTIVE_MAX="$MAX_WAIT" # extension으로 늘어남
+    EXTENSIONS_USED=0
 
-    while [ "$ELAPSED" -lt "$MAX_WAIT" ]; do
+    # 항상 1번은 SCREEN을 읽도록 — DONE 감지와 활동 감지 양쪽에서 사용
+    while [ "$ELAPSED" -lt "$EFFECTIVE_MAX" ]; do
       sleep 2
       ELAPSED=$((ELAPSED + 2))
 
+      SCREEN=$(cmux read-screen --surface "$SURFACE" --scrollback --lines 1000 2>/dev/null || echo "")
+
       # 화면 푸터에 DONE <msg-id> 마커 확인 — 긴 답변이 위로 밀려도 잡도록 scrollback 1000줄.
       if [ "$DONE_SEEN" -eq 0 ]; then
-        SCREEN=$(cmux read-screen --surface "$SURFACE" --scrollback --lines 1000 2>/dev/null || echo "")
         if echo "$SCREEN" | grep -qF "DONE $MSG_ID"; then
           DONE_SEEN=1
           DONE_AT=$ELAPSED
         fi
       fi
 
-      # 파일 안정성 체크 (size==0 은 file_stat이 빈 줄로 처리)
+      # 활동 감지: 화면 해시 변화 또는 응답 파일 stat 변화
       CUR_STAT=$(file_stat "$RESP_FILE")
+      CUR_SCREEN_HASH=$(printf '%s' "$SCREEN" | wc -c | tr -d ' ')
+      if [ "$CUR_SCREEN_HASH" != "$PREV_SCREEN_HASH" ] || { [ -n "$CUR_STAT" ] && [ "$CUR_STAT" != "$PREV_STAT" ]; }; then
+        LAST_ACTIVITY=$ELAPSED
+      fi
+      PREV_SCREEN_HASH="$CUR_SCREEN_HASH"
+
+      # 파일 안정성 체크 (size==0 은 file_stat이 빈 줄로 처리)
       if [ -n "$CUR_STAT" ] && [ "$CUR_STAT" = "$PREV_STAT" ]; then
         STABLE_FOR=$((STABLE_FOR + 2))
       else
         STABLE_FOR=0
       fi
       PREV_STAT="$CUR_STAT"
+
+      # MAX_WAIT 도달 직전에 활동 살아있으면 extension 부여
+      if [ "$ELAPSED" -ge "$EFFECTIVE_MAX" ] 2>/dev/null; then
+        :
+      fi
+      if [ "$((EFFECTIVE_MAX - ELAPSED))" -le 4 ] && \
+         [ "$ACTIVITY_GRACE" -gt 0 ] && \
+         [ "$ACTIVITY_EXTEND_BY" -gt 0 ] && \
+         [ "$EXTENSIONS_USED" -lt "$ACTIVITY_EXTEND_MAX" ] && \
+         [ "$((ELAPSED - LAST_ACTIVITY))" -lt "$ACTIVITY_GRACE" ]; then
+        EFFECTIVE_MAX=$((EFFECTIVE_MAX + ACTIVITY_EXTEND_BY))
+        EXTENSIONS_USED=$((EXTENSIONS_USED + 1))
+        echo "INFO: activity detected near deadline, extending wait by ${ACTIVITY_EXTEND_BY}s (#${EXTENSIONS_USED}/${ACTIVITY_EXTEND_MAX}, total=${EFFECTIVE_MAX}s)" >&2
+      fi
 
       # 종료 판정
       if [ "$DONE_SEEN" -eq 1 ]; then
@@ -513,13 +560,15 @@ EOF
       fi
     done
 
-    # MAX_WAIT 초과
+    # MAX_WAIT 초과 (실제로는 EFFECTIVE_MAX). 마지막 활동까지의 idle 시간도 같이 표시.
+    IDLE=$((ELAPSED - LAST_ACTIVITY))
+    SUFFIX="after_${EFFECTIVE_MAX}s ext=${EXTENSIONS_USED} idle=${IDLE}s"
     if [ ! -f "$RESP_FILE" ]; then
-      echo "STATE: timeout msg-id=$MSG_ID reason=no_file_after_${MAX_WAIT}s" >&2
+      echo "STATE: timeout msg-id=$MSG_ID reason=no_file_${SUFFIX}" >&2
     elif [ -z "$(file_stat "$RESP_FILE")" ]; then
-      echo "STATE: timeout msg-id=$MSG_ID reason=empty_file_after_${MAX_WAIT}s" >&2
+      echo "STATE: timeout msg-id=$MSG_ID reason=empty_file_${SUFFIX}" >&2
     else
-      echo "STATE: timeout msg-id=$MSG_ID reason=unstable_after_${MAX_WAIT}s" >&2
+      echo "STATE: timeout msg-id=$MSG_ID reason=unstable_${SUFFIX}" >&2
     fi
     exit 1
     ;;
@@ -561,7 +610,7 @@ EOF
     ;;
 
   *)
-    echo "Usage: $0 {peer|detect|list-peers|list-all|label|get-label|send|wait|capture|lines|prompt-count|save|stop|wait-ready|start-run|make-msg-id|wait-turn|read-response} [args...]" >&2
+    echo "Usage: $0 {peer|detect|list-peers|list-all|label|get-label|send|wait|capture|lines|prompt-count|save|stop|get-language|wait-ready|start-run|make-msg-id|wait-turn|read-response} [args...]" >&2
     exit 2
     ;;
 esac

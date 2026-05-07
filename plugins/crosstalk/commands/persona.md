@@ -1,5 +1,5 @@
 ---
-description: 토론 페르소나 프리셋 관리 — 전환/생성/편집/삭제. 빌트인 default/senior-junior/critic-builder/triple-perspective + 사용자 커스텀.
+description: Manage persona presets for the selected interface language.
 allowed-tools: Bash, AskUserQuestion, Read
 argument-hint: (인자 없음)
 ---
@@ -17,10 +17,12 @@ argument-hint: (인자 없음)
 
 ```bash
 CONFIG=~/.claude/crosstalk/config.json
-PERSONAS_DIR=~/.claude/crosstalk/personas
+LANGUAGE=$(jq -r '.language // "en"' "$CONFIG" 2>/dev/null || echo "en")
+case "$LANGUAGE" in en|ko) ;; *) LANGUAGE="en" ;; esac
+PERSONAS_DIR=~/.claude/crosstalk/personas/${LANGUAGE}
 
 if [ ! -d "$PERSONAS_DIR" ]; then
-  echo "❌ Crosstalk 셋업이 안 되어 있습니다. /crosstalk:install 먼저 실행."
+  [ "$LANGUAGE" = "ko" ] && echo "❌ Crosstalk 셋업이 안 되어 있습니다. /crosstalk:install 먼저 실행." || echo "❌ Crosstalk is not installed. Run /crosstalk:install first."
   exit 1
 fi
 
@@ -31,8 +33,19 @@ AVAILABLE=$(ls "$PERSONAS_DIR"/*.md 2>/dev/null | xargs -n1 basename | sed 's/\.
 ## 2단계: 메뉴 (AskUserQuestion)
 
 ```
+en:
+header: Personas
+question: Current active persona: ${ACTIVE} (language: ${LANGUAGE})
+options:
+  - Switch persona
+  - Create new persona
+  - Edit current persona (${ACTIVE})
+  - Delete persona
+  - Cancel
+
+ko:
 header: 페르소나 관리
-question: 현재 active 페르소나: ${ACTIVE}
+question: 현재 active 페르소나: ${ACTIVE} (언어: ${LANGUAGE})
 
 options:
   - 다른 페르소나로 전환
@@ -48,19 +61,19 @@ options:
 
 ```bash
 jq --arg name "$NEW_NAME" '.active_persona = $name' "$CONFIG" > "$CONFIG.tmp" && mv "$CONFIG.tmp" "$CONFIG"
-echo "✅ active 페르소나: $NEW_NAME"
+[ "$LANGUAGE" = "ko" ] && echo "✅ active 페르소나: $NEW_NAME" || echo "✅ Active persona: $NEW_NAME"
 ```
 
 ### 새 페르소나 만들기
 
 ```bash
 NEW_NAME="<사용자 입력>"
-[[ "$NEW_NAME" =~ ^[a-z0-9-]+$ ]] || { echo "❌ 영문 소문자/숫자/하이픈만"; exit 1; }
-[ -f "$PERSONAS_DIR/$NEW_NAME.md" ] && { echo "❌ 이미 존재"; exit 1; }
+[[ "$NEW_NAME" =~ ^[a-z0-9-]+$ ]] || { [ "$LANGUAGE" = "ko" ] && echo "❌ 영문 소문자/숫자/하이픈만" || echo "❌ Use lowercase letters, numbers, and hyphens only"; exit 1; }
+[ -f "$PERSONAS_DIR/$NEW_NAME.md" ] && { [ "$LANGUAGE" = "ko" ] && echo "❌ 이미 존재" || echo "❌ Already exists"; exit 1; }
 
 cp "$PERSONAS_DIR/default.md" "$PERSONAS_DIR/$NEW_NAME.md"
 ${EDITOR:-vi} "$PERSONAS_DIR/$NEW_NAME.md"
-echo "✅ 새 페르소나 생성: $NEW_NAME"
+[ "$LANGUAGE" = "ko" ] && echo "✅ 새 페르소나 생성: $NEW_NAME" || echo "✅ Created persona: $NEW_NAME"
 ```
 
 ### 편집
@@ -104,6 +117,7 @@ fi
 
 ## 주의사항
 
+- 현재 인터페이스 언어의 디렉토리(`~/.claude/crosstalk/personas/${LANGUAGE}`)만 관리
 - 빌트인 페르소나 삭제 시 다음 `/crosstalk:install`에서 복원됨
 - *역할 매핑*은 자동 — 사용자가 호출하는 cmux 구성에 따라 동적 할당
 - 정밀 제어 원하면 페르소나 파일에서 역할 이름을 CLI 종류로(예: `## codex`) 명시 가능

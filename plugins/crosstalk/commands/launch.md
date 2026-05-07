@@ -1,5 +1,5 @@
 ---
-description: cmux 안에서 호출하면 현재 워크스페이스에 split을 추가하고 AI CLI를 자동 시작 + 라벨링까지 완료. cmux 외부에서 호출하면 cmux 앱만 띄우고 다음 단계 안내.
+description: Launch or prepare a cmux workspace for Crosstalk. User-facing prompts support en/ko.
 allowed-tools: Bash, AskUserQuestion
 argument-hint: (인자 없음)
 ---
@@ -25,9 +25,13 @@ argument-hint: (인자 없음)
 ## 1단계: cmux 안에서 실행 중인지 확인
 
 ```bash
+CONFIG=~/.claude/crosstalk/config.json
+LANGUAGE=$(jq -r '.language // "en"' "$CONFIG" 2>/dev/null || echo "en")
+case "$LANGUAGE" in en|ko) ;; *) LANGUAGE="en" ;; esac
+
 if ! which cmux >/dev/null; then
-  echo "❌ cmux 미설치"
-  echo "   설치: brew install --cask cmux 또는 https://www.cmux.dev/"
+  [ "$LANGUAGE" = "ko" ] && echo "❌ cmux 미설치" || echo "❌ cmux is not installed"
+  [ "$LANGUAGE" = "ko" ] && echo "   설치: brew install --cask cmux 또는 https://www.cmux.dev/" || echo "   Install: brew install --cask cmux or https://www.cmux.dev/"
   exit 1
 fi
 
@@ -53,7 +57,21 @@ if ! $ALREADY_RUNNING; then
 fi
 ```
 
-사용자에게 명확히 안내:
+사용자에게 명확히 안내. `LANGUAGE=en`이면:
+
+```text
+ℹ️ /crosstalk:launch must run inside cmux to create splits automatically.
+
+This Claude Code session is currently outside cmux, so Crosstalk can only open the cmux app here.
+
+Next:
+  1. Switch to the cmux window
+  2. Run claude inside cmux
+  3. Run /crosstalk:install once in that Claude session
+  4. Run /crosstalk:launch again inside cmux
+```
+
+`LANGUAGE=ko`이면:
 
 ```
 ℹ️ /crosstalk:launch 는 cmux 안에서 실행되어야 자동 셋업이 가능합니다.
@@ -111,7 +129,12 @@ SELF_KIND=$(~/.claude/scripts/crosstalk_bridge.sh detect "$SELF_SURFACE")
 
 ### 3-4. 사용자에게 구성 선택 — 동적 옵션
 
-`AskUserQuestion`. 옵션은 **본인 + 새로 띄울 상대들** 조합:
+`AskUserQuestion`. 문구는 언어별:
+
+- en: header `Launch peers`, question `Choose peer AI CLIs to add to this cmux workspace.`
+- ko: header `AI CLI 추가`, question `현재 cmux 워크스페이스에 추가할 AI CLI를 선택하세요.`
+
+옵션은 **본인 + 새로 띄울 상대들** 조합:
 
 본인이 claude인 경우:
 - "Codex 추가 (좌:claude, 우:codex)" — 본인 + codex 1개
@@ -207,10 +230,14 @@ if [ -n "$NEW_SURFACE_2" ]; then
 fi
 ```
 
-분기 (각 pane별로):
+분기 (각 pane별로, 사용자 표시 문구는 언어별):
 - exit 0 (`STATE: ready`) → 정상. 라벨링 단계로.
-- exit 2 (`STATE: auth-needed`) → 사용자에게 *<kind> pane이 OAuth/로그인 화면입니다. 인증 후 `/crosstalk:setup`으로 라벨링하세요* 안내. 해당 pane은 라벨링 건너뜀.
-- exit 1 (`STATE: timeout`) → 사용자에게 *<kind> pane 시작이 20초 내 확인되지 않음. 수동으로 `/crosstalk:setup` 실행하거나 pane 직접 확인* 안내. 라벨링 건너뜀.
+- exit 2 (`STATE: auth-needed`) →
+  - en: `<kind> needs login/OAuth. Complete auth in that pane, then run /crosstalk:setup.`
+  - ko: `<kind> pane이 OAuth/로그인 화면입니다. 인증 후 /crosstalk:setup으로 라벨링하세요.`
+- exit 1 (`STATE: timeout`) →
+  - en: `<kind> was not ready within 20s. Check the pane or run /crosstalk:setup manually.`
+  - ko: `<kind> pane 시작이 20초 내 확인되지 않음. pane을 확인하거나 /crosstalk:setup을 실행하세요.`
 
 사용자에게 진행 상황 (예시 — 실제 kind는 SURFACE_KIND_n 으로 표시):
 ```
@@ -249,7 +276,23 @@ done
 
 ### 3-13. 완료 안내
 
+en:
+```text
+🎉 Crosstalk workspace ready.
+
+Labeled panes:
+  ✅ surface:N → claude (self)
+  ✅ surface:N → codex
+  ✅ surface:N → gemini
+
+Next, run in the Claude pane:
+  /crosstalk Is 1+1 equal to 2?
+  /crosstalk:debate <topic>
+  /crosstalk:review <PR>
 ```
+
+ko:
+```text
 🎉 Crosstalk 환경 셋업 완료!
 
 워크스페이스: workspace:N (현재 사용 중인 워크스페이스)
