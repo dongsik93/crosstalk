@@ -4,18 +4,20 @@ allowed-tools: Bash, AskUserQuestion, Read
 argument-hint: (인자 없음)
 ---
 
-# Crosstalk Install — 셋업 자동화 (v0.1.0)
+# Crosstalk Install — 셋업 자동화 (v0.1.3)
 
 마켓에서 플러그인 설치 직후 한 번 실행. 다음을 수행:
 
-1. 사전 도구 검증 (Node.js, npm, cmux, gh)
+1. 사전 도구 검증 (Node.js, npm, cmux, gh, jq)
 2. 토론 참여자 CLI 검증 (claude/codex/gemini), 누락 시 npm 자동 설치 안내
 3. Crosstalk 컴포넌트 사용자 홈에 복사
    - `~/.claude/scripts/crosstalk_bridge.sh` (cmux 통신 헬퍼)
    - `~/.claude/commands/crosstalk.md` (단독 명령 `/crosstalk` 활성화)
+   - `~/.claude/crosstalk/{rules,personas}/*.md` (토론 룰/페르소나 빌트인)
+   - `~/.claude/crosstalk/config.json` (active 프리셋 추적)
 4. 인증 안내 (gh / 각 CLI 첫 실행 시 OAuth)
 
-## v0.1.0 범위
+## v0.1.3 범위
 
 - ✅ Claude Code 측 컴포넌트 자동 설치
 - ✅ AI CLI npm 자동 설치 (claude/codex/gemini)
@@ -38,8 +40,11 @@ npm --version || echo "NPM_MISSING"
 which cmux || echo "CMUX_MISSING"
 cmux version 2>/dev/null || echo ""
 
-# gh
+# gh (review 명령에 필요)
 which gh || echo "GH_MISSING"
+
+# jq (config.json 파싱에 필요)
+which jq || echo "JQ_MISSING"
 
 # AI CLI
 which claude || echo "CLAUDE_CLI_MISSING"   # @anthropic-ai/claude-code
@@ -55,6 +60,7 @@ which gemini || echo "GEMINI_MISSING"
   ✅ Node.js v20.x
   ✅ npm 10.x
   ✅ cmux 1.3.1
+  ✅ jq 1.7
   ⚠️ gh 미설치 — review 명령 사용 시 필요
        설치: brew install gh && gh auth login
 
@@ -68,6 +74,7 @@ which gemini || echo "GEMINI_MISSING"
 - Node.js / npm 누락 → 자동 설치 불가, 안내만 (Node 공식 사이트 권장)
 - cmux 누락 → `brew install --cask cmux` 안내, 설치 진행은 가능 (사용 시 cmux 필요)
 - gh 누락 → `brew install gh && gh auth login` 안내, install 자체는 진행
+- jq 누락 → `brew install jq` 안내. 룰/페르소나 config 파싱에 필수이므로 install 차단 + 사용자에게 설치 권장 후 재실행 안내
 
 ## 2단계: AI CLI 자동 설치 (선택)
 
@@ -111,52 +118,70 @@ npm install -g @google/gemini-cli@latest
 
 ## 3단계: Crosstalk 컴포넌트 설치
 
-플러그인 디렉토리에서 사용자 홈으로 복사. 플러그인 위치 추정:
+마켓플레이스 캐시 디렉토리에서 사용자 홈으로 복사. **레포 root에 `assets/`가 있고, 그 위에 `plugins/crosstalk/`가 있는 구조** (마켓 install이 repo 전체를 보존하기 때문).
 
 ```bash
-# CLAUDE_PLUGIN_ROOT 환경변수 우선
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
+# 마켓플레이스 캐시 디렉토리 찾기
+# 구조: ~/.claude/plugins/marketplaces/<marketplace-name>/
+#         ├── assets/scripts/crosstalk_bridge.sh
+#         ├── assets/user-commands/crosstalk.md
+#         ├── assets/rules/*.md
+#         ├── assets/personas/*.md
+#         └── plugins/crosstalk/
 
-# 없으면 마켓 캐시 디렉토리에서 찾기
-if [ -z "$PLUGIN_ROOT" ]; then
-  for dir in ~/.claude/plugins/marketplaces/*/plugins/crosstalk; do
-    if [ -d "$dir" ]; then
-      PLUGIN_ROOT="${dir%/plugins/crosstalk}"
+MARKETPLACE_ROOT=""
+
+# 1순위: CLAUDE_PLUGIN_ROOT 환경변수가 plugins/crosstalk 를 가리키면 부모의 부모
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "$CLAUDE_PLUGIN_ROOT/../.." ]; then
+  CANDIDATE=$(cd "$CLAUDE_PLUGIN_ROOT/../.." && pwd)
+  [ -d "$CANDIDATE/assets/scripts" ] && MARKETPLACE_ROOT="$CANDIDATE"
+fi
+
+# 2순위: 마켓 캐시 패턴으로 찾기
+if [ -z "$MARKETPLACE_ROOT" ]; then
+  for dir in ~/.claude/plugins/marketplaces/*; do
+    if [ -d "$dir/assets/scripts" ] && [ -d "$dir/plugins/crosstalk" ]; then
+      MARKETPLACE_ROOT="$dir"
       break
     fi
   done
 fi
 
-if [ -z "$PLUGIN_ROOT" ]; then
-  echo "ERROR: Crosstalk 플러그인 디렉토리를 찾을 수 없습니다."
+if [ -z "$MARKETPLACE_ROOT" ]; then
+  echo "❌ Crosstalk 마켓플레이스 디렉토리를 찾을 수 없습니다."
+  echo "   /plugin install crosstalk@crosstalk 으로 플러그인을 먼저 설치해주세요."
   exit 1
 fi
+
+echo "📍 마켓플레이스 위치: $MARKETPLACE_ROOT"
 ```
 
 복사 작업:
 ```bash
-# bridge 스크립트
+# 사용자 홈 디렉토리들 생성 (없을 수 있음)
 mkdir -p ~/.claude/scripts
-cp "$PLUGIN_ROOT/assets/scripts/crosstalk_bridge.sh" ~/.claude/scripts/
+mkdir -p ~/.claude/commands
+mkdir -p ~/.claude/crosstalk/rules
+mkdir -p ~/.claude/crosstalk/personas
+
+# bridge 스크립트
+cp "$MARKETPLACE_ROOT/assets/scripts/crosstalk_bridge.sh" ~/.claude/scripts/
 chmod +x ~/.claude/scripts/crosstalk_bridge.sh
 
 # 단독 명령 활성화 (/crosstalk)
-cp "$PLUGIN_ROOT/assets/user-commands/crosstalk.md" ~/.claude/commands/
-
-# 룰 + 페르소나 디렉토리 + 빌트인 프리셋
-mkdir -p ~/.claude/crosstalk/rules ~/.claude/crosstalk/personas
+cp "$MARKETPLACE_ROOT/assets/user-commands/crosstalk.md" ~/.claude/commands/
 
 # 빌트인 룰 (이미 있으면 덮어쓰지 않음 — 사용자 편집 보존)
 for f in default brainstorm debate; do
   if [ ! -f ~/.claude/crosstalk/rules/${f}.md ]; then
-    cp "$PLUGIN_ROOT/assets/rules/${f}.md" ~/.claude/crosstalk/rules/
+    cp "$MARKETPLACE_ROOT/assets/rules/${f}.md" ~/.claude/crosstalk/rules/
   fi
 done
 
 # 빌트인 페르소나 (이미 있으면 덮어쓰지 않음)
 for f in default senior-junior critic-builder triple-perspective; do
   if [ ! -f ~/.claude/crosstalk/personas/${f}.md ]; then
-    cp "$PLUGIN_ROOT/assets/personas/${f}.md" ~/.claude/crosstalk/personas/
+    cp "$MARKETPLACE_ROOT/assets/personas/${f}.md" ~/.claude/crosstalk/personas/
   fi
 done
 
@@ -195,7 +220,7 @@ fi
 ## 5단계: 완료 안내 + 다음 단계
 
 ```
-✅ Crosstalk v0.1.0 설치 완료!
+✅ Crosstalk v0.1.3 설치 완료!
 
 설치된 항목:
   - ~/.claude/scripts/crosstalk_bridge.sh
@@ -227,7 +252,8 @@ fi
 
 - 이 명령은 사용자 홈 디렉토리(~/.claude/, ~/.codex/는 v0.2)에 파일을 씁니다.
   Bash 도구 실행 권한 다이얼로그가 한 번 뜰 수 있음. 승인 시 자동 진행.
-- 기존 `fight_*` 또는 `crosstalk_*` 파일이 있으면 덮어쓰기 전 사용자 확인.
+- 기존 `crosstalk_*` 파일이 있으면 덮어쓰기 전 사용자 확인.
+- 룰/페르소나 파일은 사용자 편집 우선 — 이미 있으면 덮어쓰지 않음.
 - npm 글로벌 설치는 시스템에 따라 권한 문제 가능 (sudo 필요한 환경 등). 실패 시 사용자에게 표시.
 - v0.2.0에서 추가 예정: Codex Skill 자동 설치 (~/.codex/skills/crosstalk-*/), `/crosstalk:uninstall` 강화.
 

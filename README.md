@@ -28,6 +28,7 @@
 | macOS | 14.0+ | ✅ | (cmux가 macOS 전용) |
 | Node.js + npm | 18+ | ✅ | https://nodejs.org/ 또는 `brew install node` |
 | cmux | 1.3+ | ✅ | `brew install --cask cmux` 또는 https://www.cmux.dev/ |
+| jq | 최신 | ✅ | `brew install jq` (룰/페르소나 config 파싱) |
 | gh CLI | 최신 | 선택 | `brew install gh && gh auth login` (PR 리뷰 용) |
 
 **AI CLI 구독** (사용할 것만):
