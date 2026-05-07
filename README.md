@@ -85,16 +85,16 @@ cmux 창의 Claude pane에서:
 
 ## 📚 명령어
 
-| 명령 | 별칭 | 설명 |
-|------|------|------|
-| `/crosstalk <주제>` | (단독) | 일반 토론 (debate dispatcher) |
-| `/crosstalk:debate <주제>` | `:d` | 일반 토론 (1:1 또는 다자) |
-| `/crosstalk:review [PR번호]` | `:r` | PR 리뷰 토론 (빠른 모드) |
-| `/crosstalk:review --deep [PR번호]` | `:r --deep` | PR 리뷰 토론 (깊은 모드 — 브랜치 checkout) |
-| `/crosstalk:setup` | `:s` | cmux pane 라벨링 (구성 변경 시 재실행) |
-| `/crosstalk:launch` | `:l` | cmux 자동 실행 + 분할 + AI CLI 시작 + 라벨링 |
-| `/crosstalk:install` | `:i` | 최초 셋업 (컴포넌트 + AI CLI 자동 설치) |
-| `/crosstalk:uninstall` | - | 컴포넌트 제거 |
+| 명령 | 설명 |
+|------|------|
+| `/crosstalk <주제>` | 일반 토론 단축 — `install` 이후 활성 (debate dispatcher) |
+| `/crosstalk:debate <주제>` | 일반 토론 (1:1 또는 다자) |
+| `/crosstalk:review [PR번호]` | PR 리뷰 토론 (빠른 모드) |
+| `/crosstalk:review --deep [PR번호]` | PR 리뷰 토론 (깊은 모드 — 브랜치 checkout) |
+| `/crosstalk:setup` | cmux pane 라벨링 (구성 변경 시 재실행) |
+| `/crosstalk:launch` | cmux 자동 실행 + 분할 + AI CLI 시작 + 라벨링 |
+| `/crosstalk:install` | 최초 셋업 (컴포넌트 + AI CLI 자동 설치) |
+| `/crosstalk:uninstall` | 컴포넌트 제거 |
 
 ### 토론 동작
 
