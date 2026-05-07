@@ -1,204 +1,199 @@
 # Crosstalk
 
-> 한 명령으로 Claude · Codex · Gemini를 동시에 토론시키는 Claude Code 플러그인
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+![Version](https://img.shields.io/badge/version-0.1.4-blue)
+![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
+![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-black)
 
-![Demo](docs/demo.gif)
+Run a visible multi-agent debate between Claude, Codex, and Gemini from one Claude Code slash command.
 
-> 한 줄로 셋이 토론하고 종합 의견까지.
+![Crosstalk hero](docs/hero.png)
 
----
+## Overview
 
-## 🤔 무슨 도구인가요
+Crosstalk is a Claude Code plugin that coordinates multiple AI CLIs inside [cmux](https://www.cmux.dev/) split panes. Claude acts as the moderator, sends structured debate turns to Codex and Gemini, reads their responses, and produces a final summary.
 
-세 AI CLI(Claude / Codex / Gemini)를 cmux 분할창에 띄워두고, 한 슬래시 커맨드로 자동 토론을 진행해 종합 의견을 받는 도구입니다.
+Unlike headless multi-agent tools, Crosstalk keeps the work visible. You can watch each CLI respond in its own pane while Claude manages the conversation.
 
-- **구독제 그대로 사용** — Max / Pro 계정의 CLI를 그대로 호출. API 키 별도 비용 없음.
-- **자동 사회자 배정** — 명령을 호출한 본인이 사회자가 됨. 나머지는 참여자.
-- **두 가지 모드**
-  - 일반 토론: `/crosstalk 주제`
-  - PR 리뷰 토론: `/crosstalk:review 1440` (또는 `--deep` 으로 깊은 분석 — ⚠️ experimental, 브랜치 checkout/stash 동반)
-- **컨텍스트 격리** — 메인 세션은 결과만 받고, 토론 중 추론은 옆 pane에서 별도 처리.
+## Features
 
----
+- **Use your existing CLI subscriptions**: no separate API keys or per-token integration required.
+- **Visible multi-agent workflow**: Claude, Codex, and Gemini run in neighboring cmux panes.
+- **Claude as moderator**: the calling Claude session asks, challenges, summarizes, and decides when the debate is done.
+- **File-based response transport**: responses are written to `/tmp/crosstalk/run-*/responses/*.md`, avoiding terminal scrollback loss for long answers.
+- **PR review mode**: ask multiple AI CLIs to review a GitHub PR and discuss merge readiness.
+- **Rules and personas**: switch between lightweight brainstorming, stricter debate, or custom role presets.
 
-## 📦 사전 요구사항
+## Requirements
 
-| 도구 | 버전 | 필수? | 설치 |
-|------|------|------|------|
-| macOS | 14.0+ | ✅ | (cmux가 macOS 전용) |
-| Node.js + npm | 18+ | ✅ | https://nodejs.org/ 또는 `brew install node` |
-| cmux | 1.3+ | ✅ | `brew install --cask cmux` 또는 https://www.cmux.dev/ |
-| jq | 최신 | ✅ | `brew install jq` (룰/페르소나 config 파싱) |
-| gh CLI | 최신 | 선택 | `brew install gh && gh auth login` (PR 리뷰 용) |
+| Tool | Required | Notes |
+| --- | --- | --- |
+| macOS 14+ | Yes | cmux is macOS-only |
+| Node.js + npm 18+ | Yes | Used to install missing AI CLIs |
+| cmux 1.3+ | Yes | `brew install --cask cmux` |
+| jq | Yes | Used for rules/persona config |
+| GitHub CLI | Optional | Required for PR review mode |
 
-**AI CLI 구독** (사용할 것만):
-- Claude Max / Claude Code 무료 — 자동 설치 가능
-- Codex Pro 또는 ChatGPT Plus — 자동 설치 가능
-- Gemini Pro 또는 무료 — 자동 설치 가능
+You only need the AI CLIs you plan to use. `/crosstalk:install` can help install missing Codex and Gemini CLI packages through npm.
 
----
+## Installation
 
-## 🚀 5분 설치
+In Claude Code:
 
-### 1. cmux 설치
-
-```bash
-brew install --cask cmux
-```
-
-### 2. Crosstalk 플러그인 등록 + 설치
-
-Claude Code에서:
-
-```
+```text
 /plugin marketplace add dongsik93/crosstalk
 /plugin install crosstalk@dongsik93/crosstalk
 ```
 
-### 3. 최초 셋업 (1회)
+Then run the one-time setup:
 
-```
+```text
 /crosstalk:install
 ```
 
-이 명령이 자동 처리:
-- 누락된 AI CLI npm 자동 설치 (`@openai/codex@latest`, `@google/gemini-cli@latest`)
-- bridge 스크립트 사용자 홈 복사 (`~/.claude/scripts/crosstalk_bridge.sh`)
-- 단독 명령 활성화 (`/crosstalk` 호출 가능)
+This installs:
 
-### 4. cmux 환경 자동 셋업
+- `~/.claude/scripts/crosstalk_bridge.sh`
+- `~/.claude/commands/crosstalk.md`
+- built-in rules and personas under `~/.claude/crosstalk/`
 
-```
+## Quick Start
+
+Start or attach to a cmux workspace:
+
+```text
 /crosstalk:launch
 ```
 
-cmux 실행 → 분할 → 각 pane에서 AI CLI 시작 → 라벨링까지 자동.
+Then run a debate from the Claude pane:
 
-### 5. 토론 시작
-
-cmux 창의 Claude pane에서:
-
-```
-/crosstalk 신규 안드로이드 프로젝트, Compose vs XML?
+```text
+/crosstalk Should this Android project use Compose or XML?
 ```
 
----
+For PR review:
 
-## 📚 명령어
-
-### 토론
-| 명령 | 설명 |
-|------|------|
-| `/crosstalk <주제>` | 일반 토론 단축 — `install` 이후 활성 |
-| `/crosstalk:debate <주제>` | 일반 토론 (1:1 또는 다자) |
-| `/crosstalk:debate --rules <name> <주제>` | 룰 일회성 명시 |
-| `/crosstalk:debate --persona <name> <주제>` | 페르소나 일회성 명시 |
-| `/crosstalk:review [PR번호]` | PR 리뷰 토론 (빠른 모드) |
-| `/crosstalk:review --deep [PR번호]` | PR 리뷰 토론 (깊은 모드) — ⚠️ **experimental**, 현재 디렉토리를 PR 브랜치로 checkout. stash/restore는 자동이지만 trap에만 의존하지 않음. 자세한 주의는 `commands/review.md` 참고. |
-
-### 룰/페르소나 관리
-| 명령 | 설명 |
-|------|------|
-| `/crosstalk:status` | 현재 active 셋업 + 사용 가능 목록 |
-| `/crosstalk:rules` | 토론 룰 전환/생성/편집/삭제 |
-| `/crosstalk:persona` | 페르소나 전환/생성/편집/삭제 |
-
-### 환경
-| 명령 | 설명 |
-|------|------|
-| `/crosstalk:setup` | cmux pane 라벨링 |
-| `/crosstalk:launch` | cmux 자동 분할 + AI CLI 시작 + 라벨링 |
-| `/crosstalk:install` | 최초 셋업 (컴포넌트 + AI CLI 자동 설치) |
-| `/crosstalk:uninstall` | 컴포넌트 제거 |
-
-### 토론 동작
-
-- **일반 토론**: 한쪽이 답변에 `[AGREE]` 표시 또는 15턴 도달 시 종료, 종합 의견 출력.
-- **다자 토론**: 셋이 [AGREE] 도달 또는 10라운드 도달 시 종료. 사회자가 라운드별 종합.
-- **PR 리뷰 토론**: 1단계 — 각 AI 독립 리뷰 / 2단계 — 머지 가부 토론.
-- 종료 후 토론 로그 보관 여부 질문 (보관 시 `~/Documents/crosstalk/`에 저장).
-- Ctrl+C 안전 정지 — 모든 참여자에 정지 신호 + 부분 결과 종합.
-- 답변은 파일 기반 transport(v0.1.4+): 각 AI가 `/tmp/crosstalk/run-<id>/responses/`에 응답을 쓰고 `DONE <msg-id>` 마커로 완료 신호. 화면 캡처에 의존하지 않음.
-
----
-
-## 🎬 데모
-
-![Demo](docs/demo.gif)
-
-cmux 안에서 `/crosstalk` 한 명령으로 셋이 토론 → 합의 → 종합 의견까지 자동 진행.
-
----
-
-## 🎭 토론 룰 + 페르소나 커스터마이징
-
-기본 동작도 좋지만, 토론 분위기와 캐릭터를 조합하면 시나리오별 토론을 만들 수 있다.
-
-### 빌트인 룰
-
-| 룰 | 분위기 |
-|-----|--------|
-| `default` | 한 단락 3-5문장, 안전 모드, 건전 토론 |
-| `brainstorm` | 짧고 빠르게, 합의 우선, Yes-and 응답 |
-| `debate` | 깊이있게, 데빌즈 어드보킷, 합의 신중 |
-
-### 빌트인 페르소나
-
-| 페르소나 | 역할 매핑 |
-|---------|----------|
-| `default` | 페르소나 없음 — 본연의 시각 |
-| `senior-junior` | 시니어(보수) vs 주니어(진보) |
-| `critic-builder` | 비판가 vs 빌더 (Yes-and) |
-| `triple-perspective` | 보수/혁신/실용 (3분할 전용) |
-
-### 사용 예
-
-```
-/crosstalk:rules                              # 룰 전환/생성/편집
-/crosstalk:persona                            # 페르소나 관리
-/crosstalk:status                             # 현재 셋업 한눈에
-
-# 일회성으로 다른 룰/페르소나 적용
-/crosstalk:debate --rules debate --persona critic-builder PR 머지해도 되나?
+```text
+/crosstalk:review 1440
 ```
 
-새 룰/페르소나는 `~/.claude/crosstalk/rules/`, `~/.claude/crosstalk/personas/`에 마크다운으로 추가하면 즉시 사용 가능.
+Deep PR review is available but experimental:
 
----
+```text
+/crosstalk:review --deep 1440
+```
 
-## ⚠️ 알려진 한계
+`--deep` checks out the PR branch in the current working directory and attempts to restore the previous branch afterward. Use the default fast review mode unless you explicitly need repository-wide context.
 
-| 한계 | 영향 |
-|------|------|
-| **macOS + cmux 전용** | Linux/Windows 미지원 (cmux 의존). |
-| **긴 답변** | v0.1.4부터 답변은 파일 기반 transport(`/tmp/crosstalk/run-*/responses/*.md`)로 받기 때문에 화면 스크롤 손실 없음. 단 화면 표시는 `MAX_RESPONSE_BYTES`(기본 20KB)로 제한 — 원문은 디스크에 보존. |
-| **CLI 푸터 패턴 매칭은 폴백** | CLI 버전 업그레이드 시 푸터 디자인 변경되면 자동 감지 실패. `/crosstalk:setup` 으로 라벨 박으면 안정. |
-| **답변 파일 미작성** | AI가 transport 지시를 무시하고 화면에만 답하면 `protocol-error` 상태로 처리. 사용자에게 재시도/무시/중단 선택을 띄움. |
-| **각 CLI 안의 동작 제어 불가** | 토론 중 상대 AI가 파일 수정/셸 명령 실행해도 막을 방법 없음. 안전 모드 프리앰블로 *텍스트 의견만* 가이드만 가능. |
-| **Codex 사회자 모드** | v0.1 미지원. 현재는 Claude만 사회자 가능. v0.2.0 예정. |
+## Demo
 
----
+![Crosstalk demo](docs/demo.gif)
 
-## 🛠️ 기여 / 이슈
+## Commands
 
-이슈와 PR 환영합니다. 특히:
+### Debate
 
-- 새 CLI(Qwen, Aider, OpenCode 등) 지원 추가
-- 푸터 패턴 시그니처 업데이트 (CLI 버전 업그레이드 추적)
-- 사용자 개입 감지 정확도 개선
-- 다른 멀티플렉서(tmux, zellij) 어댑터
+| Command | Description |
+| --- | --- |
+| `/crosstalk <topic>` | Shortcut for a standard debate |
+| `/crosstalk:debate <topic>` | Standard debate with one or more peer CLIs |
+| `/crosstalk:debate --rules <name> <topic>` | Use a rules preset once |
+| `/crosstalk:debate --persona <name> <topic>` | Use a persona preset once |
+| `/crosstalk:review [PR]` | Fast PR review using `gh pr diff` |
+| `/crosstalk:review --deep [PR]` | Experimental deep PR review with checkout/stash/restore |
 
----
+### Setup and Configuration
 
-## 📜 라이선스
+| Command | Description |
+| --- | --- |
+| `/crosstalk:install` | Install Crosstalk components into the user home directory |
+| `/crosstalk:launch` | Create cmux splits, start AI CLIs, and label panes |
+| `/crosstalk:setup` | Label already-open cmux panes |
+| `/crosstalk:status` | Show active rules, personas, and pane status |
+| `/crosstalk:rules` | Switch, create, edit, or delete debate rules |
+| `/crosstalk:persona` | Switch, create, edit, or delete personas |
+| `/crosstalk:uninstall` | Remove user-level Crosstalk components |
 
-MIT — 자유롭게 사용/수정/배포. `LICENSE` 참고.
+## How It Works
 
----
+1. Claude scans the current cmux workspace for peer AI CLI panes.
+2. Claude sends each peer a safe-mode preamble and a self-contained debate turn.
+3. Each peer writes its answer to a designated response file.
+4. The peer prints a short `DONE <msg-id>` marker.
+5. Claude reads the response files, continues the debate, and produces a final summary.
 
-## 🙏 만든 동기
+Example run directory:
 
-> *Claude Max, Codex Pro, Gemini Pro 다 구독하고 있는데 셋이 같이 일하면 더 좋을 텐데...* 라는 생각에서 출발했습니다.
-> *PAL MCP의 clink로 첫 시도 → 자동 토론까지는 안 되더라 → 직접 만들자 → cmux 도입 → /fight 슬래시 커맨드 → 여러 함정 발견 → /crosstalk으로 패키징.*
+```text
+/tmp/crosstalk/run-PpP6hTWx/
+  manifest.json
+  responses/
+    codex-r01-a1.md
+    gemini-r01-a1.md
+```
 
-자세한 개발 과정은 [블로그 글](https://dongsik93.github.io)에서.
+The screen is still useful for visibility, but the actual answer transport is file-based.
+
+## Rules and Personas
+
+Built-in rule presets:
+
+| Rule | Style |
+| --- | --- |
+| `default` | concise, balanced, 3-5 sentence responses |
+| `brainstorm` | short, exploratory, yes-and style |
+| `debate` | deeper critique, slower agreement |
+
+Built-in persona presets:
+
+| Persona | Roles |
+| --- | --- |
+| `default` | no assigned persona |
+| `senior-junior` | conservative senior vs progressive junior |
+| `critic-builder` | critic vs builder |
+| `triple-perspective` | conservative, innovator, pragmatic |
+
+Example:
+
+```text
+/crosstalk:debate --rules debate --persona critic-builder Should we merge this PR?
+```
+
+Custom presets live here:
+
+```text
+~/.claude/crosstalk/rules/
+~/.claude/crosstalk/personas/
+```
+
+## Limitations
+
+- **macOS only**: Crosstalk currently depends on cmux.
+- **CLI UI detection can change**: launch readiness and auto-detection use CLI footer patterns. If detection fails, run `/crosstalk:setup` and label panes manually.
+- **No hard sandbox**: Crosstalk instructs peer CLIs to write only their response file, but it cannot fully sandbox another CLI process.
+- **AI may ignore transport instructions**: this is handled as a protocol error with retry/skip/stop choices.
+- **Deep PR review is experimental**: it touches the current git worktree through checkout/stash/restore.
+- **Claude-only moderation**: Codex/Gemini moderator mode is not supported in v0.1.
+
+## Roadmap
+
+- Codex and Gemini moderator modes
+- Additional CLI adapters
+- tmux and zellij support
+- Better troubleshooting docs
+- More robust launch detection
+- Public examples of real PR review sessions
+
+## Contributing
+
+Issues and pull requests are welcome. Good first contributions include:
+
+- updating CLI footer detection patterns
+- adding rules or persona presets
+- improving install and troubleshooting docs
+- testing against different Codex/Gemini/Claude CLI versions
+- exploring tmux or zellij adapters
+
+## License
+
+Crosstalk is released under the [MIT License](LICENSE).
