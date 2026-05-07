@@ -1,7 +1,7 @@
 {
   "name": "crosstalk",
-  "version": "0.1.3",
-  "description": "cmux split pane 기반 다중 AI 토론 슬래시 커맨드. Claude/Codex/Gemini가 한 화면에서 자동 토론하고 종합 의견까지 뽑아준다.",
+  "version": "0.1.4",
+  "description": "Multi-agent AI debate slash commands powered by cmux split panes. Claude, Codex, and Gemini debate in one screen and produce a synthesized verdict.",
   "author": {
     "name": "dongsik93"
   }

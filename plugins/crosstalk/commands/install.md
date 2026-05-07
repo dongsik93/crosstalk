@@ -4,7 +4,7 @@ allowed-tools: Bash, AskUserQuestion, Read
 argument-hint: (인자 없음)
 ---
 
-# Crosstalk Install — 셋업 자동화 (v0.1.3)
+# Crosstalk Install — 셋업 자동화 (v0.1.4)
 
 마켓에서 플러그인 설치 직후 한 번 실행. 다음을 수행:
 
@@ -17,7 +17,7 @@ argument-hint: (인자 없음)
    - `~/.claude/crosstalk/config.json` (active 프리셋 추적)
 4. 인증 안내 (gh / 각 CLI 첫 실행 시 OAuth)
 
-## v0.1.3 범위
+## v0.1.4 범위
 
 - ✅ Claude Code 측 컴포넌트 자동 설치
 - ✅ AI CLI npm 자동 설치 (claude/codex/gemini)
@@ -149,7 +149,7 @@ fi
 
 if [ -z "$MARKETPLACE_ROOT" ]; then
   echo "❌ Crosstalk 마켓플레이스 디렉토리를 찾을 수 없습니다."
-  echo "   /plugin install crosstalk@crosstalk 으로 플러그인을 먼저 설치해주세요."
+  echo "   /plugin install crosstalk@dongsik93/crosstalk 으로 플러그인을 먼저 설치해주세요."
   exit 1
 fi
 
@@ -220,7 +220,7 @@ fi
 ## 5단계: 완료 안내 + 다음 단계
 
 ```
-✅ Crosstalk v0.1.3 설치 완료!
+✅ Crosstalk v0.1.4 설치 완료!
 
 설치된 항목:
   - ~/.claude/scripts/crosstalk_bridge.sh

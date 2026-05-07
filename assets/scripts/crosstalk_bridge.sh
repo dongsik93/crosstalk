@@ -12,13 +12,38 @@
 #   crosstalk_bridge.sh label <surface> <kind>     → cmux 탭에 ct-<kind> 라벨 박기 (kind: claude/codex/gemini/shell)
 #   crosstalk_bridge.sh get-label <surface>        → 라벨에서 ct-* 부분 추출 (없으면 빈 줄)
 #   crosstalk_bridge.sh send <surface> <text>      → 상대에게 텍스트 + Enter 전송 (Gemini/Codex는 Enter 2회)
-#   crosstalk_bridge.sh wait <surface> <since-line>  → 새 출력이 안정될 때까지 대기, 새 텍스트 echo
-#                                                  사용자 개입 감지 시 stderr에 INTERVENTION 표시
+#   crosstalk_bridge.sh wait <surface> <since-line>  → [LEGACY/DEPRECATED v0.1.4]
+#                                                  화면 캡처 기반 대기. 새 흐름은 wait-turn 사용.
+#                                                  외부 호환을 위해 남김. v0.2.0에서 제거 예정.
 #   crosstalk_bridge.sh capture <surface>          → 현재 화면 텍스트 캡처
 #   crosstalk_bridge.sh lines <surface>            → 현재 화면 라인 수
-#   crosstalk_bridge.sh prompt-count <surface>     → 화면에 노출된 사용자 프롬프트 개수 (개입 감지용)
+#   crosstalk_bridge.sh prompt-count <surface>     → [DEPRECATED v0.1.4] 화면 프롬프트 개수 카운트
+#                                                  파일 기반 transport 도입으로 더 이상 내부에서 사용하지 않음.
+#                                                  외부 호환을 위해 커맨드는 남김. v0.2.0에서 제거 예정.
+#   crosstalk_bridge.sh wait-ready <surface> <expected-kind>
+#                                                  → 해당 surface의 CLI(<expected-kind>: claude/codex/gemini)가
+#                                                  실제로 떠서 입력 가능한 상태가 될 때까지 대기.
+#                                                  ※ 라벨은 보지 않고 화면 푸터 패턴만 검사 (라벨이 미리 박혀있어도 무시).
+#                                                  stderr 출력:
+#                                                    STATE: ready kind=<kind>           (exit 0)
+#                                                    STATE: auth-needed kind=<kind>     (exit 2)
+#                                                    STATE: timeout kind=<kind>         (exit 1)
+#                                                  env: READY_MAX_WAIT(기본 20), READY_INTERVAL(기본 2)
 #   crosstalk_bridge.sh stop <surface>             → Ctrl+C 전송 (긴급 정지)
 #   crosstalk_bridge.sh save <path> <text>         → 토론 로그를 마크다운 파일에 append
+#
+# v0.1.4 file-based transport:
+#   crosstalk_bridge.sh start-run                       → 새 run-id 생성, /tmp/crosstalk/run-<id>/ 디렉토리 + manifest.json 생성
+#                                                       stdout: <run-id>
+#   crosstalk_bridge.sh make-msg-id <run-id> <round> <agent> <attempt>
+#                                                       → run-<id>-r<NN>-<agent>-a<N> 형태의 msg-id 출력
+#   crosstalk_bridge.sh wait-turn <surface> <run-id> <msg-id>
+#                                                       → 해당 msg-id에 대한 응답 파일이 안정될 때까지 대기
+#                                                       상태(clean|soft-complete|protocol-error|timeout) stderr 출력
+#                                                       exit 0: clean / soft-complete
+#                                                       exit 1: protocol-error / timeout
+#   crosstalk_bridge.sh read-response <run-id> <msg-id> → 응답 파일 내용을 stdout에 출력 (MAX_RESPONSE_BYTES 제한)
+#                                                       원문 파일은 변경하지 않음. 초과 시 stderr에 WARN 출력
 
 set -euo pipefail
 
@@ -27,6 +52,66 @@ self_surface() {
   cmux identify \
     | awk '/"caller"[[:space:]]*:/{flag=1} flag && /"surface_ref"/{print; exit}' \
     | sed 's/.*: "//; s/".*//'
+}
+
+# 화면 텍스트에서 CLI 종류 추정 (푸터 패턴 매칭). detect 와 wait-ready 가 공유.
+# 라벨은 보지 않는다 — 호출 측에서 필요하면 별도로 합쳐 쓸 것.
+detect_kind_from_screen() {
+  local SCREEN="$1"
+  if echo "$SCREEN" | grep -qE 'GEMINI\.md files|gemini-[0-9]+(\.[0-9]+)?[[:space:]]*\(default\)'; then
+    echo "gemini"
+  elif echo "$SCREEN" | grep -qE '\bgpt-[0-9]+(\.[0-9]+)?[[:space:]]+default[[:space:]]+·|Token usage: total='; then
+    echo "codex"
+  elif echo "$SCREEN" | grep -qE '◐ [a-z]+ · /effort|⏵⏵ accept edits on'; then
+    echo "claude"
+  else
+    echo "unknown"
+  fi
+}
+
+# 화면 텍스트에서 OAuth/로그인 화면 감지
+detect_auth_from_screen() {
+  local SCREEN="$1"
+  echo "$SCREEN" | grep -qiE 'sign in|log ?in|authenticate|oauth|enter your token|paste.*url|open.*browser|verification code'
+}
+
+# ---------- validators ----------
+# 모두 OK이면 0, 실패면 stderr에 ERROR 출력 후 비-0.
+
+validate_run_id() {
+  # mktemp -d run-XXXXXXXX 가 만든 8자리 영숫자, 또는 외부에서 넘긴 hex/영숫자.
+  case "$1" in
+    ''|*[!A-Za-z0-9_-]*) echo "ERROR: invalid run-id '$1' (allowed: A-Za-z0-9_-)" >&2; return 1 ;;
+  esac
+  # 길이 4~32
+  local len=${#1}
+  if [ "$len" -lt 4 ] || [ "$len" -gt 32 ]; then
+    echo "ERROR: invalid run-id length ($len, expected 4..32)" >&2
+    return 1
+  fi
+  return 0
+}
+
+validate_positive_int() {
+  # 1 이상 정수
+  case "$1" in
+    ''|*[!0-9]*|0|0*) echo "ERROR: '$2' must be a positive integer (got '$1')" >&2; return 1 ;;
+  esac
+  return 0
+}
+
+validate_nonnegative_int() {
+  case "$1" in
+    ''|*[!0-9]*) echo "ERROR: '$2' must be a non-negative integer (got '$1')" >&2; return 1 ;;
+  esac
+  return 0
+}
+
+validate_agent() {
+  case "$1" in
+    claude|codex|gemini) return 0 ;;
+    *) echo "ERROR: invalid agent '$1' (expected claude/codex/gemini)" >&2; return 1 ;;
+  esac
 }
 
 CMD="${1:-}"
@@ -65,17 +150,9 @@ case "$CMD" in
       exit 0
     fi
 
-    # 2순위: 푸터 매칭
+    # 2순위: 푸터 매칭 (헬퍼 사용)
     FOOTER=$(cmux read-screen --surface "$SURFACE" --lines 80 2>/dev/null | tail -20)
-    if echo "$FOOTER" | grep -qE 'GEMINI\.md files|gemini-[0-9]+(\.[0-9]+)?[[:space:]]*\(default\)'; then
-      echo "gemini"
-    elif echo "$FOOTER" | grep -qE '\bgpt-[0-9]+(\.[0-9]+)?[[:space:]]+default[[:space:]]+·|Token usage: total='; then
-      echo "codex"
-    elif echo "$FOOTER" | grep -qE '◐ [a-z]+ · /effort|⏵⏵ accept edits on'; then
-      echo "claude"
-    else
-      echo "unknown"
-    fi
+    detect_kind_from_screen "$FOOTER"
     ;;
 
   label)
@@ -200,8 +277,10 @@ case "$CMD" in
     ;;
 
   wait)
-    # 출력이 N초간 변화 없으면 안정된 것으로 간주, 그 사이 새로 추가된 텍스트만 반환
-    # 사용자 개입 감지: 보내기 전 prompt-count 와 비교해서 +1 초과면 stderr 에 INTERVENTION 표시
+    # [LEGACY/DEPRECATED v0.1.4] 화면 캡처 기반 대기 — 신규 흐름은 wait-turn 사용.
+    # 외부 호환을 위해 잔존. v0.2.0에서 제거 예정. 새 코드는 호출하지 말 것.
+    # 출력이 N초간 변화 없으면 안정된 것으로 간주, 그 사이 새로 추가된 텍스트만 반환.
+    # INTERVENTION 휴리스틱은 v0.1.4부터 의미가 없음(파일 transport가 진실).
     SURFACE="${1:?surface required}"
     SINCE_LINES="${2:-0}"
     EXPECTED_PROMPTS="${3:-}"   # 선택: 이 시점의 정상 프롬프트 개수 (보낸 직후 +1 한 값)
@@ -251,8 +330,238 @@ case "$CMD" in
     cmux send-key --surface "$SURFACE" c-c >/dev/null
     ;;
 
+  wait-ready)
+    # 라벨 무시. 화면 푸터 패턴만으로 expected-kind와 일치하는지 확인.
+    # 일치 → ready (exit 0). OAuth/로그인 화면 감지 → auth-needed (exit 2). 시간 초과 → timeout (exit 1).
+    SURFACE="${1:?surface required}"
+    KIND="${2:?expected-kind required (claude/codex/gemini)}"
+    validate_agent "$KIND" || exit 1
+
+    READY_MAX_WAIT="${READY_MAX_WAIT:-20}"
+    READY_INTERVAL="${READY_INTERVAL:-2}"
+    validate_positive_int "$READY_MAX_WAIT" "READY_MAX_WAIT" || exit 1
+    validate_positive_int "$READY_INTERVAL" "READY_INTERVAL" || exit 1
+    # interval > max 면 한 번만 체크하고 종료 (무한 대기 방지)
+    if [ "$READY_INTERVAL" -gt "$READY_MAX_WAIT" ]; then
+      READY_INTERVAL="$READY_MAX_WAIT"
+    fi
+    ELAPSED=0
+
+    while [ "$ELAPSED" -lt "$READY_MAX_WAIT" ]; do
+      sleep "$READY_INTERVAL"
+      ELAPSED=$((ELAPSED + READY_INTERVAL))
+      SCREEN=$(cmux read-screen --surface "$SURFACE" --lines 80 2>/dev/null | tail -20)
+
+      # auth 화면 먼저 (CLI가 아직 푸터 안 띄운 상태에서도 잡아줌)
+      if detect_auth_from_screen "$SCREEN"; then
+        echo "STATE: auth-needed kind=$KIND" >&2
+        exit 2
+      fi
+
+      DETECTED=$(detect_kind_from_screen "$SCREEN")
+      if [ "$DETECTED" = "$KIND" ]; then
+        echo "STATE: ready kind=$KIND" >&2
+        exit 0
+      fi
+    done
+
+    echo "STATE: timeout kind=$KIND" >&2
+    exit 1
+    ;;
+
+  start-run)
+    # mktemp 으로 충돌 없는 디렉토리 생성. 출력은 RUN_ID (run- 접두사 제외).
+    CROSSTALK_ROOT="${CROSSTALK_ROOT:-/tmp/crosstalk}"
+    mkdir -p "$CROSSTALK_ROOT"
+    RUN_DIR=$(mktemp -d "$CROSSTALK_ROOT/run-XXXXXXXX") || {
+      echo "ERROR: failed to allocate run dir under $CROSSTALK_ROOT" >&2
+      exit 1
+    }
+    BASENAME=$(basename "$RUN_DIR")     # run-XXXXXXXX
+    RID="${BASENAME#run-}"              # XXXXXXXX
+    mkdir -p "$RUN_DIR/responses"
+    cat > "$RUN_DIR/manifest.json" <<EOF
+{
+  "run_id": "$RID",
+  "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "version": "0.1.4"
+}
+EOF
+    echo "$RID"
+    ;;
+
+  make-msg-id)
+    # run-<id>-r<NN>-<agent>-a<N>
+    RUN_ID="${1:?run-id required}"
+    ROUND="${2:?round required}"
+    AGENT="${3:?agent required (claude/codex/gemini)}"
+    ATTEMPT="${4:?attempt required}"
+    validate_run_id "$RUN_ID" || exit 1
+    validate_positive_int "$ROUND" "round" || exit 1
+    validate_positive_int "$ATTEMPT" "attempt" || exit 1
+    validate_agent "$AGENT" || exit 1
+    printf 'run-%s-r%02d-%s-a%d\n' "$RUN_ID" "$ROUND" "$AGENT" "$ATTEMPT"
+    ;;
+
+  wait-turn)
+    # 응답 파일이 안정될 때까지 대기
+    # msg-id 형식: run-<id>-r<NN>-<agent>-a<N>
+    # 응답 파일: /tmp/crosstalk/run-<id>/responses/<agent>-r<NN>-a<N>.md
+    # 화면 푸터에 'DONE <msg-id>' 마커가 보이면 grace 5초 후 파일 확인
+    # 상태:
+    #   clean           — DONE 마커 + 파일 존재 + 크기/mtime 안정
+    #   soft-complete   — 파일 존재 + 안정 / DONE 마커 없음
+    #   protocol-error  — 파일 없음 또는 크기 0 (DONE 후 grace 초과)
+    #   timeout         — MAX_WAIT 초과
+    # exit code:
+    #   clean / soft-complete  → 0
+    #   protocol-error / timeout → 1
+    SURFACE="${1:?surface required}"
+    RUN_ID="${2:?run-id required}"
+    MSG_ID="${3:?msg-id required}"
+
+    validate_run_id "$RUN_ID" || exit 1
+
+    CROSSTALK_ROOT="${CROSSTALK_ROOT:-/tmp/crosstalk}"
+    STABLE_SECONDS="${STABLE_SECONDS:-5}"
+    MAX_WAIT="${MAX_WAIT:-300}"
+    DONE_GRACE="${DONE_GRACE:-5}"
+    validate_positive_int "$STABLE_SECONDS" "STABLE_SECONDS" || exit 1
+    validate_positive_int "$MAX_WAIT" "MAX_WAIT" || exit 1
+    validate_nonnegative_int "$DONE_GRACE" "DONE_GRACE" || exit 1
+
+    # run dir이 없으면 즉시 에러 (start-run 안 거치고 호출된 경우)
+    RUN_DIR="$CROSSTALK_ROOT/run-$RUN_ID"
+    if [ ! -d "$RUN_DIR/responses" ]; then
+      echo "ERROR: run dir not found: $RUN_DIR (call start-run first)" >&2
+      exit 1
+    fi
+
+    # msg-id 파싱: run-<rid>-r<NN>-<agent>-a<N>
+    # RUN_ID 는 위에서 검증했으니 sed 안에 안전.
+    RESP_BASENAME=$(echo "$MSG_ID" | sed -E "s/^run-${RUN_ID}-r([0-9]+)-([a-z]+)-a([0-9]+)$/\\2-r\\1-a\\3.md/")
+    if [ "$RESP_BASENAME" = "$MSG_ID" ]; then
+      echo "ERROR: malformed msg-id '$MSG_ID' (expected run-<rid>-r<NN>-<agent>-a<N>)" >&2
+      exit 1
+    fi
+
+    RESP_FILE="$RUN_DIR/responses/$RESP_BASENAME"
+    # mkdir 제거: start-run이 이미 responses/ 만들었음. AI가 다른 경로에 쓰면 그게 protocol-error.
+
+    # size+mtime, 단 size==0이면 "없는 것과 동일"하게 취급해 빈 줄 반환.
+    # 빈 파일을 안정 상태로 잘못 판정해 clean/soft-complete로 통과시키는 걸 막는다.
+    file_stat() {
+      [ -f "$1" ] || { echo ""; return; }
+      local s
+      s=$(stat -f '%z-%m' "$1" 2>/dev/null || stat -c '%s-%Y' "$1" 2>/dev/null || echo "")
+      [ -z "$s" ] && { echo ""; return; }
+      # size 추출 (앞쪽 숫자)
+      case "$s" in
+        0-*) echo "" ;;
+        *)   echo "$s" ;;
+      esac
+    }
+
+    PREV_STAT=""
+    STABLE_FOR=0
+    ELAPSED=0
+    DONE_SEEN=0
+    DONE_AT=0
+
+    while [ "$ELAPSED" -lt "$MAX_WAIT" ]; do
+      sleep 2
+      ELAPSED=$((ELAPSED + 2))
+
+      # 화면 푸터에 DONE <msg-id> 마커 확인 — 긴 답변이 위로 밀려도 잡도록 scrollback 1000줄.
+      if [ "$DONE_SEEN" -eq 0 ]; then
+        SCREEN=$(cmux read-screen --surface "$SURFACE" --scrollback --lines 1000 2>/dev/null || echo "")
+        if echo "$SCREEN" | grep -qF "DONE $MSG_ID"; then
+          DONE_SEEN=1
+          DONE_AT=$ELAPSED
+        fi
+      fi
+
+      # 파일 안정성 체크 (size==0 은 file_stat이 빈 줄로 처리)
+      CUR_STAT=$(file_stat "$RESP_FILE")
+      if [ -n "$CUR_STAT" ] && [ "$CUR_STAT" = "$PREV_STAT" ]; then
+        STABLE_FOR=$((STABLE_FOR + 2))
+      else
+        STABLE_FOR=0
+      fi
+      PREV_STAT="$CUR_STAT"
+
+      # 종료 판정
+      if [ "$DONE_SEEN" -eq 1 ]; then
+        # DONE 본 후 grace 경과 + 비어있지 않은 파일이 안정 → clean
+        if [ -n "$CUR_STAT" ] && [ "$STABLE_FOR" -ge "$STABLE_SECONDS" ]; then
+          echo "STATE: clean msg-id=$MSG_ID" >&2
+          exit 0
+        fi
+        # DONE 봤는데 grace 초과되도록 파일 없음/비어있음 → protocol-error
+        if [ -z "$CUR_STAT" ] && [ $((ELAPSED - DONE_AT)) -ge "$DONE_GRACE" ]; then
+          REASON="DONE_without_file"
+          [ -f "$RESP_FILE" ] && REASON="DONE_with_empty_file"
+          echo "STATE: protocol-error msg-id=$MSG_ID reason=$REASON" >&2
+          exit 1
+        fi
+      else
+        # DONE 못 봤지만 비어있지 않은 파일이 안정됨 → soft-complete
+        if [ -n "$CUR_STAT" ] && [ "$STABLE_FOR" -ge "$STABLE_SECONDS" ]; then
+          echo "STATE: soft-complete msg-id=$MSG_ID reason=file_stable_no_DONE" >&2
+          exit 0
+        fi
+      fi
+    done
+
+    # MAX_WAIT 초과
+    if [ ! -f "$RESP_FILE" ]; then
+      echo "STATE: timeout msg-id=$MSG_ID reason=no_file_after_${MAX_WAIT}s" >&2
+    elif [ -z "$(file_stat "$RESP_FILE")" ]; then
+      echo "STATE: timeout msg-id=$MSG_ID reason=empty_file_after_${MAX_WAIT}s" >&2
+    else
+      echo "STATE: timeout msg-id=$MSG_ID reason=unstable_after_${MAX_WAIT}s" >&2
+    fi
+    exit 1
+    ;;
+
+  read-response)
+    # 응답 파일을 stdout에 출력. 원문 파일은 절대 수정하지 않음.
+    # MAX_RESPONSE_BYTES 초과 시 stdout만 잘라서 출력 + stderr에 WARN.
+    RUN_ID="${1:?run-id required}"
+    MSG_ID="${2:?msg-id required}"
+    validate_run_id "$RUN_ID" || exit 1
+
+    CROSSTALK_ROOT="${CROSSTALK_ROOT:-/tmp/crosstalk}"
+    MAX_RESPONSE_BYTES="${MAX_RESPONSE_BYTES:-20000}"
+    validate_positive_int "$MAX_RESPONSE_BYTES" "MAX_RESPONSE_BYTES" || exit 1
+
+    RESP_BASENAME=$(echo "$MSG_ID" | sed -E "s/^run-${RUN_ID}-r([0-9]+)-([a-z]+)-a([0-9]+)$/\\2-r\\1-a\\3.md/")
+    if [ "$RESP_BASENAME" = "$MSG_ID" ]; then
+      echo "ERROR: malformed msg-id '$MSG_ID'" >&2
+      exit 1
+    fi
+
+    RESP_FILE="$CROSSTALK_ROOT/run-$RUN_ID/responses/$RESP_BASENAME"
+    if [ ! -f "$RESP_FILE" ]; then
+      echo "ERROR: response file not found: $RESP_FILE" >&2
+      exit 1
+    fi
+    SIZE=$(wc -c < "$RESP_FILE" | tr -d ' ')
+    if [ "$SIZE" -eq 0 ]; then
+      echo "ERROR: response file is empty: $RESP_FILE" >&2
+      exit 1
+    fi
+
+    if [ "$SIZE" -gt "$MAX_RESPONSE_BYTES" ]; then
+      echo "WARN: response truncated ($SIZE bytes > MAX_RESPONSE_BYTES=$MAX_RESPONSE_BYTES). Original file preserved at $RESP_FILE" >&2
+      head -c "$MAX_RESPONSE_BYTES" "$RESP_FILE"
+    else
+      cat "$RESP_FILE"
+    fi
+    ;;
+
   *)
-    echo "Usage: $0 {peer|detect|list-peers|list-all|label|get-label|send|wait|capture|lines|prompt-count|save|stop} [args...]" >&2
+    echo "Usage: $0 {peer|detect|list-peers|list-all|label|get-label|send|wait|capture|lines|prompt-count|save|stop|wait-ready|start-run|make-msg-id|wait-turn|read-response} [args...]" >&2
     exit 2
     ;;
 esac

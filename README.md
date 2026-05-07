@@ -16,7 +16,7 @@
 - **자동 사회자 배정** — 명령을 호출한 본인이 사회자가 됨. 나머지는 참여자.
 - **두 가지 모드**
   - 일반 토론: `/crosstalk 주제`
-  - PR 리뷰 토론: `/crosstalk:review 1440` (또는 `--deep` 으로 깊은 분석)
+  - PR 리뷰 토론: `/crosstalk:review 1440` (또는 `--deep` 으로 깊은 분석 — ⚠️ experimental, 브랜치 checkout/stash 동반)
 - **컨텍스트 격리** — 메인 세션은 결과만 받고, 토론 중 추론은 옆 pane에서 별도 처리.
 
 ---
@@ -94,7 +94,7 @@ cmux 창의 Claude pane에서:
 | `/crosstalk:debate --rules <name> <주제>` | 룰 일회성 명시 |
 | `/crosstalk:debate --persona <name> <주제>` | 페르소나 일회성 명시 |
 | `/crosstalk:review [PR번호]` | PR 리뷰 토론 (빠른 모드) |
-| `/crosstalk:review --deep [PR번호]` | PR 리뷰 토론 (깊은 모드) |
+| `/crosstalk:review --deep [PR번호]` | PR 리뷰 토론 (깊은 모드) — ⚠️ **experimental**, 현재 디렉토리를 PR 브랜치로 checkout. stash/restore는 자동이지만 trap에만 의존하지 않음. 자세한 주의는 `commands/review.md` 참고. |
 
 ### 룰/페르소나 관리
 | 명령 | 설명 |
@@ -118,6 +118,7 @@ cmux 창의 Claude pane에서:
 - **PR 리뷰 토론**: 1단계 — 각 AI 독립 리뷰 / 2단계 — 머지 가부 토론.
 - 종료 후 토론 로그 보관 여부 질문 (보관 시 `~/Documents/crosstalk/`에 저장).
 - Ctrl+C 안전 정지 — 모든 참여자에 정지 신호 + 부분 결과 종합.
+- 답변은 파일 기반 transport(v0.1.4+): 각 AI가 `/tmp/crosstalk/run-<id>/responses/`에 응답을 쓰고 `DONE <msg-id>` 마커로 완료 신호. 화면 캡처에 의존하지 않음.
 
 ---
 
@@ -170,9 +171,9 @@ cmux 안에서 `/crosstalk` 한 명령으로 셋이 토론 → 합의 → 종합
 | 한계 | 영향 |
 |------|------|
 | **macOS + cmux 전용** | Linux/Windows 미지원 (cmux 의존). |
-| **답변이 매우 길면 화면 위쪽이 스크롤되어 잘림** | `cmux read-screen`이 보이는 영역만 캡처. 마커 인식엔 영향 없으나 본문 보존 약함. |
+| **긴 답변** | v0.1.4부터 답변은 파일 기반 transport(`/tmp/crosstalk/run-*/responses/*.md`)로 받기 때문에 화면 스크롤 손실 없음. 단 화면 표시는 `MAX_RESPONSE_BYTES`(기본 20KB)로 제한 — 원문은 디스크에 보존. |
 | **CLI 푸터 패턴 매칭은 폴백** | CLI 버전 업그레이드 시 푸터 디자인 변경되면 자동 감지 실패. `/crosstalk:setup` 으로 라벨 박으면 안정. |
-| **답변 중 사용자 직접 입력 시 핑퐁 깨짐** | `INTERVENTION` 감지로 알림은 가능하나 자동 복구는 못 함. 토론 중 다른 pane에 입력 자제. |
+| **답변 파일 미작성** | AI가 transport 지시를 무시하고 화면에만 답하면 `protocol-error` 상태로 처리. 사용자에게 재시도/무시/중단 선택을 띄움. |
 | **각 CLI 안의 동작 제어 불가** | 토론 중 상대 AI가 파일 수정/셸 명령 실행해도 막을 방법 없음. 안전 모드 프리앰블로 *텍스트 의견만* 가이드만 가능. |
 | **Codex 사회자 모드** | v0.1 미지원. 현재는 Claude만 사회자 가능. v0.2.0 예정. |
 

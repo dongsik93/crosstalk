@@ -170,43 +170,66 @@ fi
 
 ### 3-9. 각 새 surface에서 AI CLI 시작
 
-사용자가 선택한 구성에 따라 매핑하여 명령 전송:
+**사용자 선택을 (NEW_SURFACE_n, SURFACE_KIND_n) 매핑으로 명시.** 그래야 "Gemini만 추가" 같이 단일 추가 케이스에서도 NEW_SURFACE_1=gemini로 정확히 들어간다. 하드코딩(첫 번째는 무조건 codex) 금지.
+
+선택 → 매핑 규칙 (본인은 이미 떠있는 CLI, 명령 안 보냄):
+
+| 사용자 선택 | NEW_SURFACE_1 | SURFACE_KIND_1 | NEW_SURFACE_2 | SURFACE_KIND_2 |
+|------------|---------------|----------------|---------------|----------------|
+| Codex만 추가 | (split 1)    | `codex`        | ""            | ""             |
+| Gemini만 추가 | (split 1)   | `gemini`       | ""            | ""             |
+| Codex + Gemini 추가 | (split 1) | `codex`    | (split 2)     | `gemini`       |
 
 ```bash
-# 예: 본인=claude, "Codex + Gemini 추가" 선택
-~/.claude/scripts/crosstalk_bridge.sh send "$NEW_SURFACE_1" "codex"
+# 위 표대로 SURFACE_KIND_1 / SURFACE_KIND_2 를 사용자 선택에 맞춰 설정한 뒤:
+~/.claude/scripts/crosstalk_bridge.sh send "$NEW_SURFACE_1" "$SURFACE_KIND_1"
 sleep 1
-~/.claude/scripts/crosstalk_bridge.sh send "$NEW_SURFACE_2" "gemini"
-sleep 1
+if [ -n "$NEW_SURFACE_2" ]; then
+  ~/.claude/scripts/crosstalk_bridge.sh send "$NEW_SURFACE_2" "$SURFACE_KIND_2"
+  sleep 1
+fi
 ```
 
-본인은 *이미 떠있는 AI CLI*이므로 명령 보내지 않음.
+### 3-10. AI CLI 시작 대기 (wait-ready 폴링)
 
-### 3-10. AI CLI 시작 대기
+`sleep 15` 고정 대기 대신 `wait-ready`로 각 pane이 실제 입력 가능 상태가 될 때까지 폴링.
+**라벨링은 ready 확인 후에 박는다** — ready 전에 라벨이 박히면 detect가 라벨 우선이라 오판 가능.
 
 ```bash
-sleep 15
+# READY_MAX_WAIT=20s, READY_INTERVAL=2s 기본 (필요 시 환경변수 override)
+~/.claude/scripts/crosstalk_bridge.sh wait-ready "$NEW_SURFACE_1" "$SURFACE_KIND_1" 2> /tmp/crosstalk_ready_1
+RC1=$?
+
+RC2=0
+if [ -n "$NEW_SURFACE_2" ]; then
+  ~/.claude/scripts/crosstalk_bridge.sh wait-ready "$NEW_SURFACE_2" "$SURFACE_KIND_2" 2> /tmp/crosstalk_ready_2
+  RC2=$?
+fi
 ```
 
-사용자에게 진행 상황:
+분기 (각 pane별로):
+- exit 0 (`STATE: ready`) → 정상. 라벨링 단계로.
+- exit 2 (`STATE: auth-needed`) → 사용자에게 *<kind> pane이 OAuth/로그인 화면입니다. 인증 후 `/crosstalk:setup`으로 라벨링하세요* 안내. 해당 pane은 라벨링 건너뜀.
+- exit 1 (`STATE: timeout`) → 사용자에게 *<kind> pane 시작이 20초 내 확인되지 않음. 수동으로 `/crosstalk:setup` 실행하거나 pane 직접 확인* 안내. 라벨링 건너뜀.
+
+사용자에게 진행 상황 (예시 — 실제 kind는 SURFACE_KIND_n 으로 표시):
 ```
-⏳ AI CLI 시작 대기 중 (약 15초)...
+⏳ AI CLI 시작 대기 중...
   본인:        claude (이미 시작됨)
-  새 split #1: codex 시작 중
-  새 split #2: gemini 시작 중   (3분할일 때)
+  새 split #1: $SURFACE_KIND_1   ✓ ready (4s)
+  새 split #2: $SURFACE_KIND_2   ⚠ auth-needed (OAuth 필요)
 ```
 
-### 3-11. 라벨 자동 박기
-
-본인 + 새 surface들 모두 라벨링:
+### 3-11. 라벨 박기 (ready 통과한 pane만)
 
 ```bash
-# 본인 (이미 떠있는 AI CLI)
+# 본인 (이미 떠있는 AI CLI) — 별도 wait-ready 불필요
 ~/.claude/scripts/crosstalk_bridge.sh label "$SELF_SURFACE" "$SELF_KIND"
 
-# 새 surface들 (사용자 선택에 따라)
-~/.claude/scripts/crosstalk_bridge.sh label "$NEW_SURFACE_1" codex   # 예시
-[ -n "$NEW_SURFACE_2" ] && ~/.claude/scripts/crosstalk_bridge.sh label "$NEW_SURFACE_2" gemini
+# 새 surface들 — wait-ready 0번 통과한 것만 SURFACE_KIND_n 으로 라벨
+[ "$RC1" -eq 0 ] && ~/.claude/scripts/crosstalk_bridge.sh label "$NEW_SURFACE_1" "$SURFACE_KIND_1"
+[ -n "$NEW_SURFACE_2" ] && [ "$RC2" -eq 0 ] && \
+  ~/.claude/scripts/crosstalk_bridge.sh label "$NEW_SURFACE_2" "$SURFACE_KIND_2"
 ```
 
 ### 3-12. 인증 안 된 CLI 감지 (휴리스틱)

@@ -45,6 +45,9 @@ PR 리뷰:
 
 `/crosstalk:debate` 본문(플러그인의 `commands/debate.md`)을 그대로 따라 실행하되, 주제는 `$ARGUMENTS`.
 
+debate 1단계의 *peer 0개 → /crosstalk:launch 제안* 흐름이 그대로 적용된다.
+즉 cmux split 안에 다른 AI pane이 없으면 자동으로 launch 실행 여부를 묻는다.
+
 ## 주의사항
 
 - 이 파일은 `/crosstalk:install` 이 사용자 홈(`~/.claude/commands/`)에 복사한 사용자 레벨 슬래시 커맨드.
