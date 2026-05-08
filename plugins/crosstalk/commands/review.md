@@ -333,42 +333,52 @@ ${SHARED_INSTR}
 
 활동 감지(`ACTIVITY_GRACE=30 ACTIVITY_EXTEND_BY=120 ACTIVITY_EXTEND_MAX=3`)로 *살아있는 한* 자동 연장. 위 값은 "최소 대기" 기준.
 
+**v0.2.0 callback 패턴 적용** — `/crosstalk:debate`와 동일한 구조:
+
 ```bash
-ATTEMPT=1
-AGENT="$kind"
-MSG_ID=$(~/.claude/scripts/crosstalk_bridge.sh make-msg-id "$RUN_ID" 1 "$AGENT" "$ATTEMPT")
-RESP_BASENAME="${AGENT}-r01-a${ATTEMPT}.md"
+# 메시지 발송 후 곧바로 종료. AI 답변이 끝나면 bridge ping이 사회자 pane을 깨움.
+# 메시지 본문에 ping 안내 한 줄 포함 (preamble 또는 메시지 끝):
+#   "리뷰 마치면: ~/.claude/scripts/crosstalk_bridge.sh ping ${RUN_ID} ${AGENT} 1"
 
-# 메시지 안의 <RESP_BASENAME>/<MSG_ID> 자리표시자 치환 후 전송
-~/.claude/scripts/crosstalk_bridge.sh send "$peer" "<치환된 메시지>"
+# state 파일에 1단계 컨텍스트 저장 (callback 핸들러가 복원 가능하게)
+{
+  echo "PHASE=review"
+  echo "ROUND=1"
+  for i in "${!AGENTS[@]}"; do
+    agent="${AGENTS[$i]}"; peer="${PEERS[$i]}"
+    echo "PEER_${agent}=${peer}"
+    echo "PREV_LINES_${agent}=$(~/.claude/scripts/crosstalk_bridge.sh lines "$peer")"
+  done
+} > "$RUN_DIR/state.sh"
 
-# wait-turn: stderr에 STATE 라인, exit code로 성공/실패
-# agent별 MAX_WAIT + transport 모드 (gemini=screen, 그 외=file)
-case "$AGENT" in
-  gemini) AGENT_MAX_WAIT=$([ "$MODE" = "deep" ] && echo 2400 || echo 900); AGENT_TRANSPORT=screen ;;
-  *)      AGENT_MAX_WAIT=$([ "$MODE" = "deep" ] && echo 1800 || echo 600); AGENT_TRANSPORT=file   ;;
-esac
-STABLE_SECONDS=8 MAX_WAIT="$AGENT_MAX_WAIT" DONE_GRACE=5 \
-ACTIVITY_GRACE=30 ACTIVITY_EXTEND_BY=120 ACTIVITY_EXTEND_MAX=3 \
-TRANSPORT_MODE="$AGENT_TRANSPORT" \
-  ~/.claude/scripts/crosstalk_bridge.sh wait-turn "$peer" "$RUN_ID" "$MSG_ID" 2> /tmp/crosstalk_state
-WAIT_RC=$?
-STATE_LINE=$(cat /tmp/crosstalk_state)
+# 메시지 발송 (1:1이든 다자든 동일)
+for i in "${!AGENTS[@]}"; do
+  agent="${AGENTS[$i]}"; peer="${PEERS[$i]}"
+  MSG=$(substitute_msg "$RAW_MSG" "$agent")  # <RUN_ID>/<AGENT> 치환
+  ~/.claude/scripts/crosstalk_bridge.sh send "$peer" "$MSG"
+done
 
-# 분기: 성공 경로일 때만 read-response 호출
-if [ "$WAIT_RC" -eq 0 ]; then
-  # clean / soft-complete — 본문 사용 가능
-  MAX_RESPONSE_BYTES=20000 \
-    ~/.claude/scripts/crosstalk_bridge.sh read-response "$RUN_ID" "$MSG_ID" > /tmp/crosstalk_resp
-  # soft-complete면 사용자 화면에 ⚠️ "DONE 마커 누락" 한 줄 노출
-else
-  # protocol-error / timeout — 사용자에게 재시도/무시/중단 AskUserQuestion
-  # 재시도 시 ATTEMPT+1 후 위 흐름 재실행 (메시지에 *직전 시도가 응답 파일을 만들지 않았다* 한 줄 추가)
-  :
-fi
+# 사회자 슬래시 커맨드는 여기서 종료. AI 답변 도착하면 bridge ping이 자동으로 사회자를 깨움.
 ```
 
-상태별 처리(`clean`/`soft-complete`/`protocol-error`/`timeout`)는 `/crosstalk:debate`의 표와 동일. `[REVIEW_DONE]` 마커는 응답 본문 끝에서 확인. INTERVENTION 휴리스틱은 v0.1.4부터 사용하지 않음.
+#### Callback 핸들링 (1단계 → 2단계)
+
+claude pane이 `[crosstalk] codex R1 done — RUN_ID=...` 메시지를 받으면:
+1. `$RUN_DIR/state.sh` source → PHASE=review 확인
+2. `$RUN_DIR/done/<agent>-r01` 파일들 확인 → 모든 참여자 완료됐는지 검사
+3. 미완료면 → 그냥 종료 (마지막 ping 도착 시 다시 진입)
+4. 모두 완료면 → 각 peer 화면에서 `PREV_LINES_<agent>` 이후 텍스트 capture → 본문 정리 → **2단계 토론 라운드** 시작
+
+#### Transport 옵션 (file/screen) 사용 시
+
+옵션 흐름은 callback 위에 얹어진다. 자세한 건 debate.md 참조. `MAX_WAIT`은 모드 + agent별:
+
+| 모드 \ agent | claude/codex 기본 | gemini |
+|---|---|---|
+| fast | 600s | 900s |
+| deep | 1800s | 2400s |
+
+`[REVIEW_DONE]` 마커는 응답 본문 끝에서 확인.
 
 Claude 본인도 같은 자료로 분석:
 - fast: `cat $DIFF_PATH` 또는 Read
@@ -417,7 +427,15 @@ PR: #${PR_NUM} <title>
 <Claude가 종합한 논점>
 ```
 
-전송 흐름은 `/crosstalk:debate`와 동일 (`make-msg-id` → `send` → `wait-turn` → `read-response`). agent별 `MAX_WAIT` + `ACTIVITY_GRACE/EXTEND_BY/EXTEND_MAX` 차등도 동일 — 라운드 토론은 debate와 같은 기본값(`gemini=360 / codex=240 / claude=180`, `ACTIVITY_GRACE=30 ACTIVITY_EXTEND_BY=60`).
+전송 흐름은 `/crosstalk:debate`와 동일 (**v0.2.0 callback 패턴**):
+- 라운드 메시지 발송 → state.sh 갱신(ROUND, PEER_*, PREV_LINES_*) → 슬래시 커맨드 종료
+- AI 답변 끝 → `bridge ping` 호출 → 사회자 pane callback
+- 모든 참여자 ping 도착 → 다음 라운드 또는 종합 의견 단계로
+
+ping 안내 문구는 메시지에 한 줄로:
+> "답변 끝나면: `~/.claude/scripts/crosstalk_bridge.sh ping ${RUN_ID} ${AGENT} ${ROUND}`"
+
+(Transport 옵션 켰으면 `make-msg-id` → `read-response` 사용. off면 화면 capture.)
 
 ## 8단계: 종합
 

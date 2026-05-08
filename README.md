@@ -142,25 +142,36 @@ Deep PR review is available but experimental:
 | `/crosstalk:persona` | Switch, create, edit, or delete personas |
 | `/crosstalk:uninstall` | Remove user-level Crosstalk components |
 
-## How It Works
+## How It Works (v0.2.0 — callback ping)
 
-1. Claude scans the current cmux workspace for peer AI CLI panes.
-2. Claude sends each peer a safe-mode preamble and a self-contained debate turn.
-3. Each peer writes its answer to a designated response file.
-4. The peer prints a short `DONE <msg-id>` marker.
-5. Claude reads the response files, continues the debate, and produces a final summary.
+1. Claude scans the current cmux workspace for peer AI CLI panes and labels them.
+2. `start-run` records the moderator (Claude) surface in the run manifest.
+3. Claude sends each peer a safe-mode preamble (persona + rules + ping protocol) once, then a short topic message.
+4. **Claude exits the slash command** — its pane is now idle, waiting for input.
+5. Each peer thinks, prints its answer to its own pane, then runs:
+   ```bash
+   ~/.claude/scripts/crosstalk_bridge.sh ping <RUN_ID> <agent> <round>
+   ```
+6. `bridge ping` reads the manifest, finds the moderator surface, and **sends a callback message into the Claude pane** (e.g. `[crosstalk] codex R3 done — RUN_ID=...`).
+7. Claude wakes up on that input, captures the peer's screen output, and starts the next round (back to step 3).
+8. When `[AGREE]` or the round limit is reached, Claude produces the final summary.
+
+> Why callback instead of polling? Earlier versions made Claude `wait-ping` indefinitely, which broke whenever the user interrupted the slash command. Callbacks keep Claude idle between rounds — any peer's `bridge ping` is enough to resume the conversation.
 
 Example run directory:
 
 ```text
 /tmp/crosstalk/run-PpP6hTWx/
-  manifest.json
-  responses/
+  manifest.json          # includes moderator_surface
+  state.sh               # current round + per-peer prev_lines
+  done/
+    codex-r01            # ping markers (also kept for debugging)
+    gemini-r01
+  responses/             # only used when --transport file/screen is on
     codex-r01-a1.md
-    gemini-r01-a1.md
 ```
 
-The screen is still useful for visibility, but the actual answer transport is file-based.
+The default transport (`--transport off`) keeps answers on screen — the moderator captures them directly. `--transport file` or `screen` is opt-in for cases where you need durable response files (long answers, agentic CLIs that mishandle freeform output).
 
 ## Rules and Personas
 
@@ -199,9 +210,10 @@ Custom presets live here:
 - **macOS only**: Crosstalk currently depends on cmux.
 - **CLI UI detection can change**: launch readiness and auto-detection use CLI footer patterns. If detection fails, run `/crosstalk:setup` and label panes manually.
 - **No hard sandbox**: Crosstalk instructs peer CLIs to write only their response file, but it cannot fully sandbox another CLI process.
-- **AI may ignore transport instructions**: this is handled as a protocol error with retry/skip/stop choices.
+- **Peer must call `bridge ping`**: completion is event-based — if a peer never pings, the moderator stays idle. You can manually call `bridge ping <RUN_ID> <agent> <round>` from any pane to unblock.
+- **AI may ignore transport instructions**: opt-in `--transport file/screen` modes treat this as a protocol error with retry/skip/stop choices.
 - **Deep PR review is experimental**: it touches the current git worktree through checkout/stash/restore.
-- **Claude-only moderation**: Codex/Gemini moderator mode is not supported in v0.1.
+- **Claude-only moderation**: Codex/Gemini moderator mode is not supported yet.
 
 ## Roadmap
 
