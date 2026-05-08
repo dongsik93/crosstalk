@@ -159,18 +159,15 @@ Read 도구로 두 파일 본문 메모리에 로드. 이후 모든 토론 메�
 5. 이 preamble에는 답하지 마라. 다음 메시지를 기다려라.
 
 ═══ Ping 프로토콜 (변경 불가) ═══
-너는 `<AGENT>` (claude/codex/gemini 중 하나) pane이다.
+너는 `<AGENT>` (claude / codex / gemini 중 하나) pane이다. RUN_ID는 `<RUN_ID>`.
 
 매 라운드 답변을 *마치는 순간* 다음 한 줄을 셸에서 실행해라 (이게 사회자에게 보내는 "끝났어" 신호다):
 
-  touch /tmp/crosstalk/run-<RUN_ID>/done/<AGENT>-r<NN>
+  ~/.claude/scripts/crosstalk_bridge.sh ping <RUN_ID> <AGENT> <ROUND>
 
-  - <AGENT>: 너의 종류 (codex / gemini / claude)
-  - <NN>: 사회자가 메시지에 적은 라운드 번호. r01 → 1, r02 → 2 ...
+예: `~/.claude/scripts/crosstalk_bridge.sh ping ${RUN_ID} codex 1`
 
-예: `touch /tmp/crosstalk/run-${RUN_ID}/done/codex-r01`
-
-이 touch 명령 외에는 도구 호출 금지. 답변 본문 자체는 그냥 화면에 텍스트로 출력하면 된다.
+이 ping 한 줄 외에는 도구 호출 금지. 답변 본문은 그냥 화면에 텍스트로 출력.
 ```
 
 `LANGUAGE=en`이면 영어, `LANGUAGE=ko`이면 한국어. 다음은 fallback 안내용 짧은 버전 (실제 본문은 위 형태로 페르소나/룰을 주입해 보낸다):
@@ -254,7 +251,7 @@ echo "📁 run dir: $RUN_DIR"
 [Round 1] 주제: <주제>
 
 너의 의견은? 합의 가능하면 [AGREE], 이견이면 [DISAGREE: 사유]로 끝.
-답변 끝나면 preamble의 ping 프로토콜대로 touch 한 줄 실행 (codex이면 `touch /tmp/crosstalk/run-${RUN_ID}/done/codex-r01`).
+답변 끝나면: `~/.claude/scripts/crosstalk_bridge.sh ping ${RUN_ID} <너> 1`
 ```
 
 (`TRANSPORT_OPTION=file` 또는 `screen`이면 메시지 끝에 ═══ Transport ═══ 섹션을 옵션값에 맞춰 추가. `off`면 안 넣음.)
@@ -268,7 +265,7 @@ echo "📁 run dir: $RUN_DIR"
 [Round 3] codex가 직전에 이렇게 말했어:
 "파전이 더 적합 — 습한 날 뜨거운 국물은 부담."
 
-너 입장은? (답변 끝나면 `touch /tmp/crosstalk/run-${RUN_ID}/done/gemini-r03`)
+너 입장은? (답변 끝나면 `~/.claude/scripts/crosstalk_bridge.sh ping ${RUN_ID} gemini 3`)
 ```
 
 다자 예:
@@ -277,7 +274,7 @@ echo "📁 run dir: $RUN_DIR"
 - Codex: 파전 (습도 부담 근거)
 - Gemini: 국밥 (정서적 위로 근거)
 
-너 차례. 어느 쪽에 동의/반박? (답변 끝나면 `touch /tmp/crosstalk/run-${RUN_ID}/done/<너>-r02`)
+너 차례. 어느 쪽에 동의/반박? (답변 끝나면 `~/.claude/scripts/crosstalk_bridge.sh ping ${RUN_ID} <너> 2`)
 ```
 
 > 메시지 길이 가이드: **사회자가 보내는 메시지를 짧게**. 페르소나/룰 다시 박지 마라.
@@ -321,70 +318,135 @@ echo "📁 run dir: $RUN_DIR"
 
 ### 전송 + 대기 흐름
 
-각 참여자(`peer`, `kind`)에게 한 턴 보낼 때, `TRANSPORT_OPTION` 값에 따라 다른 흐름:
+#### 메시지 치환 (공통)
+
+먼저 *각 peer별로* 메시지를 치환한다. preamble에서 이미 박은 `<RUN_ID>` / `<AGENT>` 자리표시자도 *각 turn 메시지*에 다시 등장하므로 *보내기 직전* `sed`로 실제 값 치환:
 
 ```bash
-ROUND=N                  # 턴/라운드 번호
-AGENT="$kind"            # codex / gemini / claude (peer 쪽)
+substitute_msg() {
+  local raw="$1" agent="$2"
+  printf '%s' "$raw" \
+    | sed "s|<RUN_ID>|${RUN_ID}|g" \
+    | sed "s|<AGENT>|${agent}|g" \
+    | sed "s|<ROUND>|${ROUND}|g"
+}
+```
 
-# agent별 MAX_WAIT (옵션 무관 공통)
-case "$AGENT" in
-  gemini) AGENT_MAX_WAIT=360 ;;
-  codex)  AGENT_MAX_WAIT=240 ;;
-  *)      AGENT_MAX_WAIT=180 ;;
-esac
+> placeholder가 그대로 들어가면 AI가 `bridge ping <RUN_ID> codex 1`을 *문자열 그대로* 호출해 실패한다. 치환 필수.
+
+#### agent별 MAX_WAIT (공통)
+
+```bash
+agent_max_wait() {
+  case "$1" in
+    gemini) echo 360 ;;
+    codex)  echo 240 ;;
+    *)      echo 180 ;;
+  esac
+}
+```
+
+#### 1:1 모드 (단일 peer)
+
+```bash
+peer="$PEER_SURFACE"; AGENT="$PEER_KIND"
+PREV_LINES=$(~/.claude/scripts/crosstalk_bridge.sh lines "$peer")
+MSG=$(substitute_msg "$RAW_MSG" "$AGENT")
+~/.claude/scripts/crosstalk_bridge.sh send "$peer" "$MSG"
 
 if [ "$TRANSPORT_OPTION" = "off" ]; then
-  # ───── 기본 흐름: 화면 캡처 + ping 파일 ─────
-  # 답변 본문은 화면에 그대로 두고, 완료 신호는 AI가 touch한 ping 파일로 받는다.
-  # → 진짜 이벤트 기반. 화면 안정성 휴리스틱 의존도 ↓.
-  PREV_LINES=$(~/.claude/scripts/crosstalk_bridge.sh lines "$peer")
-
-  ~/.claude/scripts/crosstalk_bridge.sh send "$peer" "<메시지 (Transport 섹션 없음, ping 안내는 preamble에서 이미 줌)>"
-
-  # ping 파일 도착까지 polling (1초 간격, 활동 감지로 자동 연장)
-  WAIT_PING_SURFACE="$peer" \
-  MAX_WAIT="$AGENT_MAX_WAIT" \
+  WAIT_PING_SURFACE="$peer" MAX_WAIT="$(agent_max_wait "$AGENT")" \
   ACTIVITY_GRACE=30 ACTIVITY_EXTEND_BY=60 ACTIVITY_EXTEND_MAX=3 \
-    ~/.claude/scripts/crosstalk_bridge.sh wait-ping "$RUN_ID" "$AGENT" "$ROUND" 2> /tmp/crosstalk_state
-  PING_RC=$?
-
-  # ping 받았으면 화면에서 PREV_LINES 이후 새 텍스트만 추출 → 사회자(Claude)가 본문만 정리.
-  if [ "$PING_RC" -eq 0 ]; then
+    ~/.claude/scripts/crosstalk_bridge.sh wait-ping "$RUN_ID" "$AGENT" "$ROUND" \
+    2> "/tmp/crosstalk_state_${AGENT}"
+  RC=$?
+  if [ "$RC" -eq 0 ]; then
     ~/.claude/scripts/crosstalk_bridge.sh capture "$peer" \
-      | tail -n +"$((PREV_LINES + 1))" > /tmp/crosstalk_resp_raw
-  else
-    # timeout — 사용자에게 *기다리기 / 무시(부분 진행) / 중단* AskUserQuestion
-    :
+      | tail -n +"$((PREV_LINES + 1))" > "/tmp/crosstalk_resp_${AGENT}"
   fi
-  # raw 화면 텍스트 → Claude가 CLI 박스, 진행 표시(✦/⏵), 푸터 등 노이즈 무시하고 답변 단락만 정리.
+  # RC != 0 → timeout. AskUserQuestion 분기.
 else
-  # ───── 옵션 흐름: file / screen transport ─────
+  # file/screen transport (옵션)
   ATTEMPT=1
   MSG_ID=$(~/.claude/scripts/crosstalk_bridge.sh make-msg-id "$RUN_ID" "$ROUND" "$AGENT" "$ATTEMPT")
-  RESP_BASENAME="${AGENT}-r$(printf '%02d' "$ROUND")-a${ATTEMPT}.md"
-
-  # gemini는 agentic CLI라 file 모드 시키면 WriteFile 사고 → screen 강제. 그 외는 file.
   if [ "$TRANSPORT_OPTION" = "screen" ] || [ "$AGENT" = "gemini" ]; then
-    AGENT_TRANSPORT=screen
+    MODE_VAL=screen
   else
-    AGENT_TRANSPORT=file
+    MODE_VAL=file
   fi
-
-  ~/.claude/scripts/crosstalk_bridge.sh send "$peer" "<치환된 메시지>"
-
-  STABLE_SECONDS=5 MAX_WAIT="$AGENT_MAX_WAIT" DONE_GRACE=5 \
+  STABLE_SECONDS=5 MAX_WAIT="$(agent_max_wait "$AGENT")" DONE_GRACE=5 \
   ACTIVITY_GRACE=30 ACTIVITY_EXTEND_BY=60 ACTIVITY_EXTEND_MAX=3 \
-  TRANSPORT_MODE="$AGENT_TRANSPORT" \
-    ~/.claude/scripts/crosstalk_bridge.sh wait-turn "$peer" "$RUN_ID" "$MSG_ID" 2> /tmp/crosstalk_state
+  TRANSPORT_MODE="$MODE_VAL" \
+    ~/.claude/scripts/crosstalk_bridge.sh wait-turn "$peer" "$RUN_ID" "$MSG_ID" \
+    2> "/tmp/crosstalk_state_${AGENT}"
+  RC=$?
+  if [ "$RC" -eq 0 ]; then
+    MAX_RESPONSE_BYTES=20000 \
+      ~/.claude/scripts/crosstalk_bridge.sh read-response "$RUN_ID" "$MSG_ID" \
+      > "/tmp/crosstalk_resp_${AGENT}"
+  fi
 fi
-WAIT_RC=$?
-STATE_LINE=$(cat /tmp/crosstalk_state)
-
-# 응답 파일 읽기 (원문 보존, 너무 크면 stdout만 truncate + WARN)
-MAX_RESPONSE_BYTES=20000 \
-  ~/.claude/scripts/crosstalk_bridge.sh read-response "$RUN_ID" "$MSG_ID" > /tmp/crosstalk_resp 2>> /tmp/crosstalk_state || true
 ```
+
+#### 다자 모드 (병렬: send-all → wait-all)
+
+직렬로 한 명씩 기다리면 *Codex 4분 + Gemini 6분 = 10분* 걸림. 병렬화하면 *max(4, 6) = 6분*.
+
+```bash
+# 1) 모든 참여자에게 *먼저* 메시지 일괄 전송. PREV_LINES 따로 기록.
+declare -a AGENTS PEERS
+# 예: AGENTS=(codex gemini), PEERS=(surface:8 surface:9)
+
+declare -A PREV_LINES_MAP
+for i in "${!AGENTS[@]}"; do
+  agent="${AGENTS[$i]}"; peer="${PEERS[$i]}"
+  PREV_LINES_MAP[$agent]=$(~/.claude/scripts/crosstalk_bridge.sh lines "$peer")
+  MSG=$(substitute_msg "$RAW_MSG" "$agent")
+  ~/.claude/scripts/crosstalk_bridge.sh send "$peer" "$MSG"
+done
+
+# 2) 모든 ping을 *병렬*로 대기. agent별 PID 추적.
+declare -A WAIT_PIDS
+for i in "${!AGENTS[@]}"; do
+  agent="${AGENTS[$i]}"; peer="${PEERS[$i]}"
+  WAIT_PING_SURFACE="$peer" MAX_WAIT="$(agent_max_wait "$agent")" \
+  ACTIVITY_GRACE=30 ACTIVITY_EXTEND_BY=60 ACTIVITY_EXTEND_MAX=3 \
+    ~/.claude/scripts/crosstalk_bridge.sh wait-ping "$RUN_ID" "$agent" "$ROUND" \
+    2> "/tmp/crosstalk_state_${agent}" &
+  WAIT_PIDS[$agent]=$!
+done
+
+# 3) 각 PID 결과 수집. 한 명 늦어도 다른 사람은 이미 ping 받아둔 상태.
+declare -A WAIT_RCS
+for agent in "${AGENTS[@]}"; do
+  wait "${WAIT_PIDS[$agent]}"
+  WAIT_RCS[$agent]=$?
+done
+
+# 4) ping 받은 agent의 화면 캡처 → 본문 추출.
+for i in "${!AGENTS[@]}"; do
+  agent="${AGENTS[$i]}"; peer="${PEERS[$i]}"
+  if [ "${WAIT_RCS[$agent]}" -eq 0 ]; then
+    ~/.claude/scripts/crosstalk_bridge.sh capture "$peer" \
+      | tail -n +"$((PREV_LINES_MAP[$agent] + 1))" > "/tmp/crosstalk_resp_${agent}"
+  fi
+  # WAIT_RCS[$agent] != 0 → 그 agent timeout. AskUserQuestion 으로 *기다리기 / 무시 / 중단* 분기.
+done
+```
+
+> 핵심: **한 명 답변을 기다리는 동안 다른 사람도 동시에 답하고 있음**. Claude는 둘 다 ping 올 때까지 wait. codex가 먼저 ping 보내도 gemini ping 까지 기다린다 (5단계 전체가 라운드 단위로 동기화됨).
+
+#### 사회자 본인 (Claude) 답변 ping
+
+사회자가 다자 토론에 *참여자로서* 자기 의견을 낼 때:
+1. Claude가 자기 답변을 *toolless*로 화면(현재 슬래시 커맨드 본문)에 텍스트로 출력.
+2. 답변 출력 *직후* Bash 도구로 ping 호출:
+   ```bash
+   ~/.claude/scripts/crosstalk_bridge.sh ping "$RUN_ID" claude "$ROUND"
+   ```
+3. 위 다자 흐름의 `AGENTS` 배열에 `claude`도 포함시키면 wait 단계가 자동으로 본인 ping까지 기다림.
+
+> 사회자=참여자 동시일 때 일관성을 위해 본인도 ping 호출. 안 하면 wait 단계가 본인 ping을 기다리느라 timeout.
 
 ### 상태별 처리
 

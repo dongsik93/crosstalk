@@ -36,6 +36,10 @@
 #                                                  마켓플레이스 캐시에서 빌트인 프리셋을 자동 복사 (자가치유).
 #                                                  이미 있는 파일은 보존. <lang>: en|ko
 #                                                  stdout: 'OK' (정상) | 'SKIPPED reason=...' (마켓 캐시 못 찾음)
+#   crosstalk_bridge.sh ping <run-id> <agent> <round>
+#                                                  → AI가 답변을 마치고 호출하는 "끝났어" 신호.
+#                                                  내부적으로 /tmp/crosstalk/run-<id>/done/<agent>-r<NN> 를 touch.
+#                                                  사회자(claude)는 wait-ping으로 즉시 감지.
 #   crosstalk_bridge.sh wait-ping <run-id> <agent> <round>
 #                                                  → AI가 "답변 끝났음" 신호로 touch한 ping 파일을 기다린다.
 #                                                  ping 경로: /tmp/crosstalk/run-<id>/done/<agent>-r<NN>
@@ -470,7 +474,7 @@ case "$CMD" in
 {
   "run_id": "$RID",
   "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "version": "0.1.8"
+  "version": "0.1.9"
 }
 EOF
     echo "$RID"
@@ -683,6 +687,27 @@ EOF
     exit 1
     ;;
 
+  ping)
+    # AI가 "답변 끝났음" 신호로 호출. AI는 경로/패턴을 외울 필요 없이 이 한 줄만:
+    #   ~/.claude/scripts/crosstalk_bridge.sh ping <RUN_ID> <YOUR_AGENT> <ROUND>
+    RUN_ID="${1:?run-id required}"
+    AGENT="${2:?agent required (claude/codex/gemini)}"
+    ROUND="${3:?round required}"
+    validate_run_id "$RUN_ID" || exit 1
+    validate_agent "$AGENT" || exit 1
+    validate_positive_int "$ROUND" "round" || exit 1
+
+    CROSSTALK_ROOT="${CROSSTALK_ROOT:-/tmp/crosstalk}"
+    RUN_DIR="$CROSSTALK_ROOT/run-$RUN_ID"
+    if [ ! -d "$RUN_DIR/done" ]; then
+      echo "ERROR: run dir not found: $RUN_DIR (sender call start-run first)" >&2
+      exit 1
+    fi
+    PING_FILE="$RUN_DIR/done/$(printf '%s-r%02d' "$AGENT" "$ROUND")"
+    : > "$PING_FILE"
+    echo "OK ping=$AGENT-r$(printf '%02d' "$ROUND")"
+    ;;
+
   wait-ping)
     # AI가 "답변 끝났음" 신호로 touch한 ping 파일을 기다린다.
     # transport=off 흐름에서 사용 — 답변 본문은 화면에 그대로 두고, 완료 신호만 파일로 받는다.
@@ -794,7 +819,7 @@ EOF
     ;;
 
   *)
-    echo "Usage: $0 {peer|detect|list-peers|list-all|label|get-label|send|wait|capture|lines|prompt-count|save|stop|get-language|ensure-presets|wait-ready|start-run|make-msg-id|wait-turn|wait-ping|read-response} [args...]" >&2
+    echo "Usage: $0 {peer|detect|list-peers|list-all|label|get-label|send|wait|capture|lines|prompt-count|save|stop|get-language|ensure-presets|wait-ready|start-run|make-msg-id|wait-turn|ping|wait-ping|read-response} [args...]" >&2
     exit 2
     ;;
 esac
