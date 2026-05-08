@@ -13,7 +13,7 @@ cmux 안에서 분할된 다른 AI CLI(Codex/Gemini)들과 자동으로 토론�
 
 - `--rules <name>` — 일회성 룰 프리셋 명시 (예: `brainstorm`, `debate`, `default`)
 - `--persona <name>` — 일회성 페르소나 프리셋 명시 (예: `senior-junior`, `critic-builder`)
-- `--transport off|file|screen` — 답변 받는 방법. **기본 `off`** (자연스러운 핑-퐁 토론, 화면 캡처).
+- `--transport off|file|screen` — 답변 받는 방법. **기본 `off`** (자연스러운 핑-퐁 토론, 답변은 응답 파일).
   - `off` (기본): 사회자가 화면 텍스트를 직접 읽고 정리. AI에게 transport 지시 안 함 → 답변 instruction following 좋음.
   - `file`: 답변 본문을 별도 파일에 쓰게 함. 긴 답변 안전. (claude/codex 권장)
   - `screen`: 답변을 BEGIN/END 블록으로 출력하게 함. (gemini용 — agentic 도구 사고 방지)
@@ -153,21 +153,48 @@ Read 도구로 두 파일 본문 메모리에 로드. 이후 모든 토론 메�
 
 ═══ 안전 규칙 (변경 불가) ═══
 1. 답변은 자연스러운 텍스트로. 길이/형식은 룰 섹션을 따른다.
-2. 도구 사용 금지 (WriteFile/외부 API 등). 단 *답변 끝났음*을 알리는 ping 한 줄은 예외.
+2. WriteFile/외부 API 같은 도구 사용 금지. 답변 채널은 *셸을 통한 파일 작성 + ping 호출* 두 가지뿐.
 3. 합의 시 [AGREE], 이견 시 [DISAGREE: 사유].
 4. 사회자(Claude)가 매 라운드 짧은 메시지로 차례를 넘긴다 — 그 메시지에만 답해라.
 5. 이 preamble에는 답하지 마라. 다음 메시지를 기다려라.
 
-═══ Ping 프로토콜 (변경 불가) ═══
-너는 `<AGENT>` (claude / codex / gemini 중 하나) pane이다. RUN_ID는 `<RUN_ID>`.
+═══ 답변 절차 (변경 불가) ═══
+너는 `<AGENT>` (claude / codex 중 하나) pane이다. RUN_ID는 `<RUN_ID>`.
 
-매 라운드 답변을 *마치는 순간* 다음 한 줄을 셸에서 실행해라 (이게 사회자에게 보내는 "끝났어" 신호다):
+매 라운드 답변은 두 단계로 처리한다.
 
-  ~/.claude/scripts/crosstalk_bridge.sh ping <RUN_ID> <AGENT> <ROUND>
+**1단계 — 답변을 파일에 기록**
 
-예: `~/.claude/scripts/crosstalk_bridge.sh ping ${RUN_ID} codex 1`
+다음 셸 명령으로 답변 본문을 파일에 *직접* 써라 (WriteFile 같은 도구 사용 X, 그냥 셸 heredoc):
 
-이 ping 한 줄 외에는 도구 호출 금지. 답변 본문은 그냥 화면에 텍스트로 출력.
+```bash
+cat > /tmp/crosstalk/run-<RUN_ID>/responses/<AGENT>-r<NN>.md <<'EOF'
+<답변 본문 여기에>
+EOF
+```
+
+- `<NN>`: 라운드 번호를 두 자리로 (예: 1 → r01, 3 → r03).
+- 답변 본문에 `[AGREE]` 또는 `[DISAGREE: 사유]` 포함.
+- 화면에 답변 따로 출력하지 않아도 된다 — 파일이 진실.
+
+**2단계 — callback ping**
+
+파일 작성이 *완전히 끝난 다음*, 다음 한 줄을 호출해 사회자에게 신호:
+
+```bash
+~/.claude/scripts/crosstalk_bridge.sh ping <RUN_ID> <AGENT> <ROUND>
+```
+
+> 1단계가 *반드시 먼저*. ping이 먼저 가면 사회자가 빈 파일을 읽는다. 순서 중요.
+
+예: codex가 1라운드 답변할 때
+```bash
+cat > /tmp/crosstalk/run-${RUN_ID}/responses/codex-r01.md <<'EOF'
+비 오는 날 국밥은 정서적 위로 측면에서 분명한 가치가 있다...
+[AGREE]
+EOF
+~/.claude/scripts/crosstalk_bridge.sh ping ${RUN_ID} codex 1
+```
 ```
 
 `LANGUAGE=en`이면 영어, `LANGUAGE=ko`이면 한국어. 다음은 fallback 안내용 짧은 버전 (실제 본문은 위 형태로 페르소나/룰을 주입해 보낸다):
@@ -236,7 +263,7 @@ echo "📁 run dir: $RUN_DIR"
 ```
 
 용도:
-- `TRANSPORT_OPTION=off` (기본): 답변은 화면 캡처. ping 파일만 `$RUN_DIR/done/<agent>-r<NN>` 사용.
+- `TRANSPORT_OPTION=off` (기본): 답변 본문은 `$RUN_DIR/responses/<agent>-r<NN>.md` (AI가 셸 heredoc로 작성). ping은 *완료 신호*만 (`$RUN_DIR/done/<agent>-r<NN>` 마커 + cmux callback).
 - `file`/`screen`: 답변 본문이 `$RUN_DIR/responses/<agent>-r<NN>-a<N>.md`.
 
 ## 5단계: 토론 실행 — callback 핑-퐁
@@ -392,12 +419,27 @@ claude pane이 ping 메시지 (`[crosstalk] codex R6 done — RUN_ID=...`) 를 �
 4. **모든 참여자 ping 도착했는지 확인**:
    - `for agent in $AGENTS; do [ -f "$RUN_DIR/done/${agent}-r${ROUND_PADDED}" ] || NOT_READY=1; done`
    - 누군가 빠졌으면 → 사회자는 *그냥 종료*. 마지막 ping 도착 시 자동으로 다시 진입함.
-5. 모두 도착했으면:
-   - 각 peer 화면에서 `PREV_LINES_<agent>` 이후 새 텍스트 capture → 본문 정리
+5. 모두 도착했으면 — **답변 본문은 화면이 아니라 응답 파일에서 읽는다**:
+   ```bash
+   for agent in "${AGENTS[@]}"; do
+     ROUND_PADDED=$(printf '%02d' "$ROUND")
+     RESP_FILE="$RUN_DIR/responses/${agent}-r${ROUND_PADDED}.md"
+     if [ -f "$RESP_FILE" ] && [ -s "$RESP_FILE" ]; then
+       cp "$RESP_FILE" "/tmp/crosstalk_resp_${agent}"
+     else
+       # 파일이 없거나 비었음 — AI가 ping은 보냈는데 파일 작성 누락
+       # AskUserQuestion: 재요청 / 무시(부분 진행) / 중단
+       :
+     fi
+   done
+   ```
+   - 본문 정리 (Claude가 후처리)
    - 다음 라운드 메시지 작성 → 위 "한 라운드 발송 + 종료" 단계 다시
    - 종료 조건 (`[AGREE]` / 라운드 한도) 도달이면 8단계 (종합 의견)로
 
-> 핵심: 한 ping 도착 = 한 번의 슬래시 커맨드 재진입. 매 ping마다 "내가 마지막 ping이면 다음 라운드 진행, 아니면 종료" 식. **race 없음** (파일 시스템이 직렬화).
+> 핵심: 답변 본문은 *파일에서 읽는다*. 화면 캡처(v0.2.0의 `capture` 호출) 의존 제거. AI가 *답변 파일을 다 쓴 다음에* ping을 호출하는 순서를 지켜주면 race 없음.
+
+> v0.2.0과의 차이: v0.2.0은 화면 캡처 + ping callback이라 *AI가 답을 다 쓰기 전에 ping이 먼저 가는 race* 가 있었다. v0.2.1에서 답변 채널을 *파일*로 옮기고 ping은 *순수 신호*로 단순화. 답변이 어디 있는지 한 군데로 통일.
 
 > **사회자 본인 답변 ping**: 다자에서 Claude 본인이 자기 의견 출력 후 즉시 `~/.claude/scripts/crosstalk_bridge.sh ping "$RUN_ID" claude "$ROUND"` 호출. 본인이 본인 pane을 깨우는 형태 (cmux send self → callback) — 자연스럽게 다음 단계로.
 

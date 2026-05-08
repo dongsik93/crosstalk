@@ -477,7 +477,7 @@ case "$CMD" in
 {
   "run_id": "$RID",
   "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "moderator_surface": "$MOD_SURFACE"
 }
 EOF

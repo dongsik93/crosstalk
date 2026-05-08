@@ -4,7 +4,7 @@ allowed-tools: Bash, AskUserQuestion, Read
 argument-hint: [--presets-only [--language en|ko]]
 ---
 
-# Crosstalk Install — Setup Automation (v0.2.0)
+# Crosstalk Install — Setup Automation (v0.2.1)
 
 마켓에서 플러그인 설치 직후 한 번 실행. 다음을 수행:
 
@@ -18,11 +18,11 @@ argument-hint: [--presets-only [--language en|ko]]
    - `~/.claude/crosstalk/config.json` (active 프리셋 추적)
 5. 인증 안내 (gh / 각 CLI 첫 실행 시 OAuth)
 
-## v0.2.0 범위
+## v0.2.1 범위
 
 - ✅ Claude Code 측 컴포넌트 자동 설치
 - ✅ AI CLI npm 자동 설치 (claude/codex/gemini)
-- ⚠️ Codex Skill 자동 설치는 v0.2.0에서 지원 예정
+- ⚠️ Codex Skill 자동 설치는 v0.2.1에서 지원 예정
   - v0.1에서는 사용자가 Codex CLI를 설치해도 *Codex가 사회자가 되는 시나리오*는 미지원
   - Codex pane은 *참여자*로만 동작 (Claude 사회자 토론에 응답)
 
@@ -317,7 +317,7 @@ done
 ## 6단계: 완료 안내 + 다음 단계
 
 ```
-✅ Crosstalk v0.2.0 installed!
+✅ Crosstalk v0.2.1 installed!
 
 설치된 항목:
   - ~/.claude/scripts/crosstalk_bridge.sh
@@ -351,7 +351,7 @@ Customize rules/personas:
 - 기존 `crosstalk_*` 파일이 있으면 덮어쓰기 전 사용자 확인.
 - 룰/페르소나 파일은 언어별 디렉토리에 설치. 사용자 편집 우선 — 이미 있으면 덮어쓰지 않음.
 - npm 글로벌 설치는 시스템에 따라 권한 문제 가능 (sudo 필요한 환경 등). 실패 시 사용자에게 표시.
-- v0.2.0에서 추가 예정: Codex Skill 자동 설치 (~/.codex/skills/crosstalk-*/), `/crosstalk:uninstall` 강화.
+- v0.2.1에서 추가 예정: Codex Skill 자동 설치 (~/.codex/skills/crosstalk-*/), `/crosstalk:uninstall` 강화.
 
 ## 사용자 노출 형식
 
