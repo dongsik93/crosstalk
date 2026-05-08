@@ -5,13 +5,13 @@
   },
   "metadata": {
     "description": "Multi-agent AI debate via cmux split panes — run Claude, Codex, and Gemini in one command and let them debate.",
-    "version": "0.1.9"
+    "version": "0.2.0"
   },
   "plugins": [
     {
       "name": "crosstalk",
       "description": "cmux-based multi-agent AI debate slash commands (debate / review / setup / launch / install / rules / persona / status).",
-      "version": "0.1.9",
+      "version": "0.2.0",
       "author": {
         "name": "dongsik93"
       },

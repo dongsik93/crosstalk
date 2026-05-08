@@ -470,11 +470,15 @@ case "$CMD" in
     BASENAME=$(basename "$RUN_DIR")     # run-XXXXXXXX
     RID="${BASENAME#run-}"              # XXXXXXXX
     mkdir -p "$RUN_DIR/responses" "$RUN_DIR/done"
+
+    # 사회자(=호출자=Claude) surface 식별. ping callback이 이 pane에 메시지 보낸다.
+    MOD_SURFACE=$(self_surface 2>/dev/null || echo "")
     cat > "$RUN_DIR/manifest.json" <<EOF
 {
   "run_id": "$RID",
   "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "version": "0.1.9"
+  "version": "0.2.0",
+  "moderator_surface": "$MOD_SURFACE"
 }
 EOF
     echo "$RID"
@@ -688,7 +692,8 @@ EOF
     ;;
 
   ping)
-    # AI가 "답변 끝났음" 신호로 호출. AI는 경로/패턴을 외울 필요 없이 이 한 줄만:
+    # AI가 답변을 마치고 호출. **사회자(claude) pane을 직접 깨우는 callback**.
+    # AI는 한 줄만:
     #   ~/.claude/scripts/crosstalk_bridge.sh ping <RUN_ID> <YOUR_AGENT> <ROUND>
     RUN_ID="${1:?run-id required}"
     AGENT="${2:?agent required (claude/codex/gemini)}"
@@ -699,16 +704,37 @@ EOF
 
     CROSSTALK_ROOT="${CROSSTALK_ROOT:-/tmp/crosstalk}"
     RUN_DIR="$CROSSTALK_ROOT/run-$RUN_ID"
-    if [ ! -d "$RUN_DIR/done" ]; then
-      echo "ERROR: run dir not found: $RUN_DIR (sender call start-run first)" >&2
+    MANIFEST="$RUN_DIR/manifest.json"
+    if [ ! -f "$MANIFEST" ]; then
+      echo "ERROR: run dir not found: $RUN_DIR (moderator must call start-run first)" >&2
       exit 1
     fi
-    PING_FILE="$RUN_DIR/done/$(printf '%s-r%02d' "$AGENT" "$ROUND")"
-    : > "$PING_FILE"
-    echo "OK ping=$AGENT-r$(printf '%02d' "$ROUND")"
+
+    # 1) 마커 파일도 그대로 남긴다 (디버깅/사후 검증용. wait-ping은 더 이상 안 씀)
+    mkdir -p "$RUN_DIR/done"
+    : > "$RUN_DIR/done/$(printf '%s-r%02d' "$AGENT" "$ROUND")"
+
+    # 2) 사회자 pane에 callback 메시지 전송
+    MOD_SURFACE=$(jq -r '.moderator_surface // ""' "$MANIFEST" 2>/dev/null || echo "")
+    if [ -z "$MOD_SURFACE" ] || [ "$MOD_SURFACE" = "null" ]; then
+      echo "WARN: moderator_surface not in manifest. ping marker only." >&2
+      echo "OK ping=$AGENT-r$(printf '%02d' "$ROUND") (marker-only)"
+      exit 0
+    fi
+
+    # cmux send 로 사회자 pane 입력창에 메시지 박는다 → claude가 새 사용자 입력으로 받음
+    CALLBACK_MSG="[crosstalk] $AGENT R$ROUND done — RUN_ID=$RUN_ID. 답변은 cmux pane 화면에서 캡처해서 정리하고 다음 라운드 진행해."
+    cmux send --surface "$MOD_SURFACE" "$CALLBACK_MSG" >/dev/null 2>&1
+    cmux send-key --surface "$MOD_SURFACE" enter >/dev/null 2>&1
+    sleep 0.5
+    cmux send-key --surface "$MOD_SURFACE" enter >/dev/null 2>&1
+
+    echo "OK ping=$AGENT-r$(printf '%02d' "$ROUND") → $MOD_SURFACE"
     ;;
 
   wait-ping)
+    # [DEPRECATED v0.2.0] callback 구조로 전환되며 더 이상 사용하지 않음.
+    # 호환을 위해 잔존 — ping 파일이 생기긴 하므로 외부 스크립트는 동작.
     # AI가 "답변 끝났음" 신호로 touch한 ping 파일을 기다린다.
     # transport=off 흐름에서 사용 — 답변 본문은 화면에 그대로 두고, 완료 신호만 파일로 받는다.
     # ping 경로: $CROSSTALK_ROOT/run-<id>/done/<agent>-r<NN>
