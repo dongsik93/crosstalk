@@ -261,17 +261,34 @@ jq --argjson r "$NEXT_ROUND" '.current_round = $r' "$MANIFEST" > "$TMP" && mv "$
 
 ## 7단계: 종료 조건 검사
 
-매 callback 진입 시 5단계 끝에 다음 조건을 검사한다:
+각 응답 파일에서 verdict를 *bridge로 추출*한다 (LLM 자유 해석 X — deterministic):
+
+```bash
+declare -A VERDICTS REASONS CONFIDENCES
+for agent in "${AGENTS[@]}"; do
+  RESP="$RUN_DIR/responses/${agent}-r${ROUND_PADDED}.md"
+  eval "$(~/.claude/scripts/crosstalk_bridge.sh extract-verdict "$RESP" \
+    | sed -E 's/^/AG_/')"
+  # AG_verdict / AG_reason / AG_confidence 변수가 채워짐
+  VERDICTS["$agent"]="$AG_verdict"
+  REASONS["$agent"]="$AG_reason"
+  CONFIDENCES["$agent"]="$AG_confidence"
+done
+```
+
+종료 판정:
 
 | 조건 | 결과 |
 |---|---|
-| 전원 [AGREE] 또는 결론 의미상 동일 | ✅ 합의 종료 → 8단계 (합의) |
+| 전원 verdict=AGREE | ✅ 합의 종료 → 8단계 (합의) |
+| 한 명 이상 verdict=RESPECT_DISAGREE | 🤝 존중 분기 종료 → 8단계 (분기) |
 | 전원이 직전 라운드와 새 근거 없이 같은 주장 반복 | 🤝 존중 분기 종료 → 8단계 (분기) |
-| 한 명 이상 [RESPECT_DISAGREE] 명시 | 🤝 존중 분기 종료 → 8단계 (분기) |
 | 라운드 = 10 | ⚠️ 하드 캡 종료 → 8단계 (강제) |
 | 위 어느 것도 아님 | 6단계 핑퐁 한 번 더 |
 
-> "새 근거 없이 같은 주장"은 Claude가 직전 응답 파일과 이번 응답 파일을 비교해 휴리스틱으로 판단. 보수적으로 (의심스러우면 한 라운드 더 돌린다).
+> verdict 마커(`[AGREE]`, `[RESPECT_DISAGREE: 사유]`)는 bridge가 정규식으로 잡는다. 사회자가 "이건 합의 같다" 같은 자유 해석으로 종료하지 말 것 — 마커만 신뢰.
+>
+> "새 근거 없이 같은 주장" 판정만 LLM 휴리스틱: 직전 응답 파일과 이번 응답 파일 비교. 보수적으로 (의심스러우면 한 라운드 더).
 
 ## 8단계: 최종 산출물
 
@@ -296,11 +313,14 @@ jq --argjson r "$NEXT_ROUND" '.current_round = $r' "$MANIFEST" > "$TMP" && mv "$
 ```
 🤝 존중 분기 (${ROUND} 라운드, 합의 불가 — 가치/우선순위 차이)
 
-🟦 claude:  <결론> (근거: ...)
-🟧 codex:   <결론> (근거: ...)
-🟪 gemini:  <결론> (근거: ...)
+🟦 claude:  <결론> (근거: ...) [verdict: ${VERDICT}, conf: ${CONF}]
+🟧 codex:   <결론> (근거: ...) [verdict: ${VERDICT}, conf: ${CONF}]
+🟪 gemini:  <결론> (근거: ...) [verdict: ${VERDICT}, conf: ${CONF}]
 
 핵심 이견: <어느 가정/우선순위에서 갈렸는지>
+
+근거 (footnote): 각 verdict는 응답 파일에서 bridge가 추출. RESPECT_DISAGREE 사유는
+응답 파일의 [RESPECT_DISAGREE: ...] 마커에서 가져왔다.
 ```
 
 **하드 캡 종료**:

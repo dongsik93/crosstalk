@@ -479,6 +479,46 @@ case "$CMD" in
     echo "summary: deleted=$DELETED kept=$KEPT (cutoff=${GC_DAYS}d, last=$HOME/.crosstalk/last 보존)"
     ;;
 
+  extract-verdict)
+    # 'crosstalk extract-verdict <response-file>'
+    # 응답 본문에서 verdict 마커와 신뢰도를 정규식으로 뽑는다.
+    # 사회자(LLM)의 자유 해석 대신 deterministic 판정용.
+    #
+    # 출력 형식 (key=value, 한 줄씩):
+    #   verdict=AGREE | RESPECT_DISAGREE | DISAGREE | NONE
+    #   reason=<RESPECT_DISAGREE/DISAGREE의 사유, 없으면 빈 줄>
+    #   confidence=high | medium | low | unknown
+    RESP_FILE="${1:?response file required}"
+    if [ ! -f "$RESP_FILE" ]; then
+      echo "ERROR: response file not found: $RESP_FILE" >&2
+      echo "Next: 'crosstalk_bridge.sh ping' 이후 응답 파일 경로 확인. \$RUN_DIR/responses/<agent>-r<NN>.md 형태." >&2
+      exit 1
+    fi
+
+    # 마지막에 등장하는 마커가 최종 의견 (반복 시 보수적으로 마지막 것)
+    VERDICT="NONE"
+    REASON=""
+    if grep -qE '\[AGREE\]' "$RESP_FILE"; then
+      VERDICT="AGREE"
+    fi
+    # RESPECT_DISAGREE가 AGREE보다 우선 (더 명시적)
+    if grep -qE '\[RESPECT_DISAGREE' "$RESP_FILE"; then
+      VERDICT="RESPECT_DISAGREE"
+      REASON=$(grep -oE '\[RESPECT_DISAGREE:[^]]*\]' "$RESP_FILE" | tail -1 | sed -E 's/^\[RESPECT_DISAGREE:[[:space:]]*//; s/\][[:space:]]*$//')
+    elif grep -qE '\[DISAGREE' "$RESP_FILE"; then
+      VERDICT="DISAGREE"
+      REASON=$(grep -oE '\[DISAGREE:[^]]*\]' "$RESP_FILE" | tail -1 | sed -E 's/^\[DISAGREE:[[:space:]]*//; s/\][[:space:]]*$//')
+    fi
+
+    # 신뢰도: "신뢰도: high" / "confidence: medium" 등
+    CONFIDENCE=$(grep -iE '신뢰도|confidence' "$RESP_FILE" \
+      | grep -oiE '(high|medium|low)' \
+      | head -1 | tr '[:upper:]' '[:lower:]')
+    [ -z "$CONFIDENCE" ] && CONFIDENCE="unknown"
+
+    printf 'verdict=%s\nreason=%s\nconfidence=%s\n' "$VERDICT" "$REASON" "$CONFIDENCE"
+    ;;
+
   show-last)
     # 마지막 run 경로 한 줄 + 1줄 요약 (analysis.md or summary.md 첫 의미 있는 줄)
     LAST_DIR="$HOME/.crosstalk/last"
