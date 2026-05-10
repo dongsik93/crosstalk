@@ -27,7 +27,21 @@ argument-hint: [--presets-only [--language en|ko]]
 
 ---
 
-## 0단계: 옵션 파싱 — `--presets-only` 빠른 경로
+## 0단계: 플랫폼 검증 (게이트)
+
+Crosstalk은 cmux에 의존하므로 macOS에서만 동작한다. 다른 플랫폼이면 즉시 명확히 차단:
+
+```bash
+PLATFORM=$(uname -s 2>/dev/null || echo "unknown")
+if [ "$PLATFORM" != "Darwin" ]; then
+  echo "❌ Crosstalk은 macOS만 지원합니다. (감지된 플랫폼: $PLATFORM)" >&2
+  echo "Next: cmux는 macOS-only입니다. 다른 OS에서는 Crosstalk을 사용할 수 없습니다." >&2
+  echo "      tmux/zellij 어댑터는 로드맵의 미래 작업 — https://github.com/dongsik93/crosstalk" >&2
+  exit 1
+fi
+```
+
+## 0단계-B: 옵션 파싱 — `--presets-only` 빠른 경로
 
 전체 install 안 돌리고 빌트인 룰/페르소나만 보충하고 싶을 때 사용.
 

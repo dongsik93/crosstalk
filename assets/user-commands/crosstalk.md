@@ -31,7 +31,10 @@ fi
 
 # peer 감지
 if [ "$CMUX" = "inside" ]; then
-  PEERS=$(~/.claude/scripts/crosstalk_bridge.sh list-peers 2>/dev/null | awk -F'\t' '$2 ~ /^(claude|codex|gemini)$/' | wc -l | tr -d ' ')
+  # awk 표현식은 single-quote로 감싸 셸 치환 방지 ($2는 awk 필드).
+  PEERS=$(~/.claude/scripts/crosstalk_bridge.sh list-peers 2>/dev/null \
+    | awk -F'\t' '$2 ~ /^(claude|codex|gemini)$/' \
+    | wc -l | tr -d ' ')
 else
   PEERS="?"
 fi

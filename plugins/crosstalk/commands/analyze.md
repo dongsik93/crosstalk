@@ -84,8 +84,9 @@ PERSONA_FILE="$HOME/.claude/crosstalk/personas/${LANGUAGE}/${PERSONA_NAME}.md"
 # 자기 자신 제외한 cmux pane 목록 — <surface>\t<kind> 형식
 PEERS_RAW=$(~/.claude/scripts/crosstalk_bridge.sh list-peers)
 
-# kind가 claude/codex/gemini 인 것만 추출
-PEERS=$(echo "$PEERS_RAW" | awk -F'\t' '$2 ~ /^(claude|codex|gemini)$/ {print $1"|"$2}')
+# kind가 claude/codex/gemini 인 것만 추출.
+# awk 표현식은 반드시 single-quote로 감싸 셸 변수 치환을 방지한다 ($2는 awk 필드 참조).
+PEERS=$(printf '%s\n' "$PEERS_RAW" | awk -F'\t' '$2 ~ /^(claude|codex|gemini)$/ {print $1"|"$2}')
 ```
 
 `PEERS`가 비어있으면 `/crosstalk:launch` 안내 후 종료.
@@ -339,8 +340,7 @@ echo "📁 last: $LAST_DIR  (또는 $RUN_DIR)"
 
 ```
 /tmp/crosstalk/run-<RUN_ID>/
-  manifest.json       # mode=analyze + moderator + peers
-  state.sh            # current_round, agents
+  manifest.json       # mode=analyze + moderator + peers + agents + current_round (단일 진실)
   done/
     claude-r01        # ping 마커
     codex-r01
