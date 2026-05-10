@@ -1,7 +1,7 @@
 # Crosstalk
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.2.4-blue)
+![Version](https://img.shields.io/badge/version-0.2.5-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-black)
 
@@ -87,31 +87,31 @@ This installs:
 
 ## Quick Start
 
-Start or attach to a cmux workspace:
-
-```text
-/crosstalk:launch
-```
-
-Then run a debate from the Claude pane:
+Just type your question:
 
 ```text
 /crosstalk Should this Android project use Compose or XML?
 ```
 
-For PR review:
+That's it. If anything is missing (cmux not running, no peer CLIs in the workspace), `/crosstalk` will tell you the next single action and preserve your topic — you don't need to learn `:install`, `:launch`, or `:setup` separately.
+
+To check status without starting a run:
+
+```text
+/crosstalk
+```
+
+(empty call shows a one-line readiness doctor: installed / cmux / peers).
+
+For PR review (fast):
 
 ```text
 /crosstalk:review 1440
 ```
 
-Deep PR review is available but experimental:
+Deep PR review is experimental — `/crosstalk:review --deep 1440` checks out the PR branch in your current working directory and attempts to restore the previous branch afterward. Use the default fast mode unless you explicitly need repository-wide context.
 
-```text
-/crosstalk:review --deep 1440
-```
-
-`--deep` checks out the PR branch in the current working directory and attempts to restore the previous branch afterward. Use the default fast review mode unless you explicitly need repository-wide context.
+> Advanced: `:install`, `:launch`, `:setup`, `:status`, `:rules`, `:persona`, and the explicit `:debate` / `:analyze` commands are all available for manual control or recovery, but you typically don't need to call them. See [Commands](#commands).
 
 ## Demo
 
@@ -119,19 +119,18 @@ Deep PR review is available but experimental:
 
 ## Commands
 
-### Debate
+### Run / Discuss
 
 | Command | Description |
 | --- | --- |
-| `/crosstalk <topic>` | Shortcut for a standard debate |
-| `/crosstalk:debate <topic>` | Standard debate with one or more peer CLIs |
-| `/crosstalk:debate --rules <name> <topic>` | Use a rules preset once |
-| `/crosstalk:debate --persona <name> <topic>` | Use a persona preset once |
-| `/crosstalk:analyze <topic>` | Independent analysis without a moderator. Each peer analyzes the same raw input; ping-pong only on disagreement, ends in consensus or respectful divergence (v0.2.2+). |
-| `/crosstalk:analyze --rules <name> <topic>` | Apply a rules preset for one analyze run (v0.2.4+) |
-| `/crosstalk:analyze --persona <name> <topic>` | Apply a persona preset for one analyze run (v0.2.4+) |
-| `/crosstalk:review [PR]` | Fast PR review using `gh pr diff` |
-| `/crosstalk:review --deep [PR]` | Experimental deep PR review with checkout/stash/restore |
+| `/crosstalk <topic>` | **Single entrypoint.** Runs analyze; inline-handles missing setup; preserves topic across cmux entry (v0.2.5+). |
+| `/crosstalk` | Empty call → readiness doctor (installed / cmux / peers + next single action). |
+| `/crosstalk:analyze <topic>` | Explicit analyze (independent multi-agent analysis with conditional ping-pong). |
+| `/crosstalk:analyze --rules <name> <topic>` | Apply a rules preset for one analyze run. |
+| `/crosstalk:analyze --persona <name> <topic>` | Apply a persona preset for one analyze run. |
+| `/crosstalk:debate <topic>` | Explicit debate (moderator-driven turn-taking). Will be removed in v0.3.0 — analyze covers most cases. |
+| `/crosstalk:review [PR]` | Fast PR review using `gh pr diff`. |
+| `/crosstalk:review --deep [PR]` | Experimental deep PR review with checkout/stash/restore. |
 
 ### Setup and Configuration
 
