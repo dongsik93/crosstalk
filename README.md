@@ -1,7 +1,7 @@
 # Crosstalk
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.3.0-blue)
+![Version](https://img.shields.io/badge/version-0.3.1-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-black)
 
@@ -112,7 +112,7 @@ For PR review (fast):
 
 Deep PR review is experimental — `/crosstalk:review --deep 1440` checks out the PR branch in your current working directory and attempts to restore the previous branch afterward. Use the default fast mode unless you explicitly need repository-wide context.
 
-> Advanced: `:install`, `:launch`, `:setup`, `:status`, `:rules`, `:persona`, and the explicit `:debate` / `:analyze` commands are all available for manual control or recovery, but you typically don't need to call them. See [Commands](#commands).
+> Advanced: `:install`, `:launch`, `:setup`, `:status`, `:rules`, `:persona`, the explicit `:analyze`, and `:review` are all available for manual control or recovery, but you typically don't need to call them. See [Commands](#commands).
 
 ## Demo
 

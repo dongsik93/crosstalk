@@ -8,7 +8,7 @@ argument-hint: [--language en|ko]
 
 두 가지 용도:
 
-1. **cmux 라벨링** (기본): `/crosstalk:debate`, `:review`가 옆 pane의 CLI 종류를 빠르고 정확하게 식별하도록 cmux 탭에 라벨(`ct-claude`, `ct-codex`, `ct-gemini`, `ct-shell`)을 박는다.
+1. **cmux 라벨링** (기본): `/crosstalk:analyze`, `:review`가 옆 pane의 CLI 종류를 빠르고 정확하게 식별하도록 cmux 탭에 라벨(`ct-claude`, `ct-codex`, `ct-gemini`, `ct-shell`)을 박는다.
 2. **언어 전환**: `/crosstalk:setup --language ko` 또는 `--language en` 으로 UI 언어를 즉시 토글. 인자 없이 호출하면 `AskUserQuestion`으로 묻는다. 토글 후엔 라벨링도 그대로 진행.
 
 ## 0단계: 옵션 파싱 — `--language`
@@ -154,7 +154,7 @@ Labeled panes:
 
 You can now run:
   /crosstalk <topic>
-  /crosstalk:debate <topic>
+  /crosstalk:analyze <topic>
   /crosstalk:review [PR]
 ```
 
@@ -168,9 +168,9 @@ You can now run:
   surface:8  → codex
 
 이제 다음 명령을 사용할 수 있습니다:
-  /crosstalk <주제>           — 단독 토론 (install 이후)
-  /crosstalk:debate <주제>    — 일반 토론
-  /crosstalk:review [PR번호]  — PR 리뷰 토론
+  /crosstalk <주제>           — 단일 entrypoint (권장)
+  /crosstalk:analyze <주제>   — 명시적 호출
+  /crosstalk:review [PR번호]  — PR 리뷰 (advanced)
 
 cmux pane 구성을 바꾸면 다시 /crosstalk:setup 을 실행하세요.
 ```

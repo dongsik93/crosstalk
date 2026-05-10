@@ -287,8 +287,8 @@ Labeled panes:
 
 Next, run in the Claude pane:
   /crosstalk Is 1+1 equal to 2?
-  /crosstalk:debate <topic>
-  /crosstalk:review <PR>
+  /crosstalk:analyze <topic>      (explicit form)
+  /crosstalk:review <PR>          (PR review, advanced)
 ```
 
 ko:
@@ -310,9 +310,9 @@ ko:
 (인증 안 된 CLI 있을 시) ⚠️ 안내 메시지.
 
 다음 단계: 본인 (Claude) pane에서
-  /crosstalk 1+1은 2다 동의해?       ← 단독 명령
-  /crosstalk:debate <주제>            ← 명시적
-  /crosstalk:review <PR번호>          ← PR 리뷰 토론
+  /crosstalk 1+1은 2다 동의해?       ← 단독 명령 (권장)
+  /crosstalk:analyze <주제>           ← 명시적
+  /crosstalk:review <PR번호>          ← PR 리뷰 (advanced)
 ```
 
 ---
