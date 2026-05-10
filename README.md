@@ -1,11 +1,11 @@
 # Crosstalk
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.3.1-blue)
+![Version](https://img.shields.io/badge/version-0.4.0-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-black)
 
-Independent multi-agent analysis from one Claude Code slash command. Each CLI analyzes the same raw input on its own; results are compared and ping-pong only when verdicts diverge.
+Multi-agent analysis *and* co-work from one Claude Code slash command. Ask once and each CLI analyzes independently; or hand out an assignment and each CLI delivers its piece in parallel — both modes ship with deterministic verdicts and a one-line stop button.
 
 ![Crosstalk hero](docs/hero.png)
 
@@ -24,6 +24,7 @@ Unlike headless multi-agent tools, Crosstalk keeps the work visible. You watch e
 - **File-based response transport**: responses are written to `/tmp/crosstalk/run-*/responses/*.md`, avoiding terminal scrollback loss for long answers.
 - **Topic preservation across cmux entry**: call `/crosstalk` outside cmux, then `/crosstalk:resume` inside — your topic is kept.
 - **PR review mode** *(advanced)*: moderator-driven review using `gh pr diff`.
+- **Co-work mode** *(v0.4.0+)*: each peer runs its own `/goal` to deliver part of a task in parallel, isolated in git worktrees. Crosstalk fans out the assignment, enforces a time cap, and collects results.
 
 ## Requirements
 
@@ -128,6 +129,8 @@ Deep PR review is experimental — `/crosstalk:review --deep 1440` checks out th
 | `/crosstalk` | Empty call → readiness doctor (installed / cmux / peers + next single action). |
 | `/crosstalk:analyze <topic>` | Explicit analyze. Independent multi-agent analysis with conditional ping-pong, ends in consensus or respectful divergence. |
 | `/crosstalk:resume` | Resume a topic that was preserved when `/crosstalk` was called outside cmux. |
+| `/crosstalk:cowork "claude=A, codex=B, goal=Y"` | **Co-work mode (v0.4.0+).** Each peer runs its own `/goal` in its own CLI to deliver a piece of the task in parallel. Worktree-isolated by default. |
+| `/crosstalk:cowork-stop [RUN_ID]` | Stop an in-flight cowork run. Sends `/goal clear` + termination notice to every peer. |
 | `/crosstalk:status` | Show active rules, personas, and pane status. |
 | `/crosstalk:install` / `/crosstalk:uninstall` | Install or remove Crosstalk components. |
 
@@ -186,6 +189,39 @@ All three transport modes write to `responses/`:
 - `off` (default): peer writes the response file via shell heredoc. Simplest, recommended.
 - `file`: explicit per-turn Transport block instructs the peer to write to a per-attempt file (`<agent>-r<NN>-a<N>.md`). Useful for very long-running runs.
 - `screen` (legacy): peer prints `CROSSTALK_BEGIN`/`CROSSTALK_END` blocks; bridge converts to a response file. Kept for agentic CLIs (e.g. Gemini) that mishandle shell heredocs.
+
+## Co-work Mode (v0.4.0+)
+
+`analyze` is for *opinions*. `cowork` is for *delivery*. Hand out an assignment and a goal, each peer runs its own `/goal` slash command in its own CLI and works until it thinks the goal is met.
+
+```text
+/crosstalk:cowork "claude=Repository layer, codex=ViewModel layer, goal=mail search feature shipping with passing tests"
+```
+
+Flow:
+
+1. **Crosstalk parses the assignment**, asks once whether to isolate work in git worktrees (recommended), and falls back to `--no-worktree` for shared-tree work.
+2. **Fan-out**: each peer is told its slice + `/goal "<goal>"` + write a final report to `responses/<agent>-r01.md` + `bridge ping` when done.
+3. **Each peer runs its own `/goal`**. The peer's CLI keeps stop blocked until it judges the goal met — Crosstalk doesn't second-guess that judgment.
+4. **Time cap**: default 1 hour. On timeout (or on `/crosstalk:cowork-stop`), bridge sends `/goal clear` + a termination notice to every peer via cmux.
+5. **Result aggregation**: the moderator reads each peer's report + their git log inside the worktree and writes `cowork-summary.md`. Worktree handling is up to the user — `keep` (default), `merge`, or `drop`.
+
+```text
+/tmp/crosstalk/run-<RUN_ID>/
+  manifest.json
+  responses/
+    claude-r01.md          # each peer's work report
+    codex-r01.md
+  cowork-summary.md        # moderator's rolled-up summary
+
+/tmp/crosstalk/worktrees/run-<RUN_ID>/
+  claude/                  # git worktree on branch cowork/<RUN_ID>-claude
+  codex/                   # git worktree on branch cowork/<RUN_ID>-codex
+```
+
+> Why delegate goal judgment to the peer's `/goal`? It keeps Crosstalk *thin*: peers know their own model's signal best, and Crosstalk doesn't have to invent a verifier. The cap + `cowork-stop` are the only safety nets — no LLM judging "looks done."
+>
+> MVP scope: peers don't see each other's progress (no live cross-check). They run in parallel; the moderator stitches results at the end. Cross-check between peers is on the roadmap.
 
 ## Rules and Personas (advanced)
 
