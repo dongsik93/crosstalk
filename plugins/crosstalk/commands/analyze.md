@@ -47,8 +47,11 @@ argument-hint: <분석 주제 / 자료 본문>
 ## 1단계: peer 탐색
 
 ```bash
-SELF_SURFACE=$(~/.claude/scripts/crosstalk_bridge.sh self-surface)
-PEERS=$(~/.claude/scripts/crosstalk_bridge.sh list-peers)  # 자기 자신 제외 ai pane 라벨 목록
+# 자기 자신 제외한 cmux pane 목록 — <surface>\t<kind> 형식
+PEERS_RAW=$(~/.claude/scripts/crosstalk_bridge.sh list-peers)
+
+# kind가 claude/codex/gemini 인 것만 추출
+PEERS=$(echo "$PEERS_RAW" | awk -F'\t' '$2 ~ /^(claude|codex|gemini)$/ {print $1"|"$2}')
 ```
 
 `PEERS`가 비어있으면 `/crosstalk:launch` 안내 후 종료.
@@ -58,10 +61,29 @@ PEERS=$(~/.claude/scripts/crosstalk_bridge.sh list-peers)  # 자기 자신 제�
 ```bash
 RUN_ID=$(~/.claude/scripts/crosstalk_bridge.sh start-run)
 RUN_DIR="/tmp/crosstalk/run-${RUN_ID}"
+MANIFEST="$RUN_DIR/manifest.json"
 echo "📁 run dir: $RUN_DIR"
 ```
 
-참가자 목록은 `claude` + `$PEERS`. manifest의 `mode`를 `analyze`로 표시 (선택, 디버깅용).
+`start-run`이 자동으로 `moderator_surface`를 manifest에 박는다. 추가로 *참가자 목록 + 모드*를 manifest에 머지한다 (callback 재진입 시 컨텍스트 복원용):
+
+```bash
+# AGENTS = claude + 감지된 peer kinds
+AGENTS=("claude")
+for p in $PEERS; do
+  AGENTS+=("${p#*|}")
+done
+
+# manifest 갱신 (mode + agents + current_round)
+TMP_MANIFEST=$(mktemp)
+jq --arg mode analyze \
+   --argjson round 1 \
+   --argjson agents "$(printf '%s\n' "${AGENTS[@]}" | jq -R . | jq -s .)" \
+   '. + {mode: $mode, agents: $agents, current_round: $round}' \
+   "$MANIFEST" > "$TMP_MANIFEST" && mv "$TMP_MANIFEST" "$MANIFEST"
+```
+
+> 별도 `state.sh`는 만들지 않는다. **manifest.json이 단일 진실** — callback 재진입 시 manifest만 읽으면 컨텍스트 복원 가능.
 
 ## 3단계: fan-out (모든 참가자에게 동일 메시지 전송)
 
@@ -119,7 +141,13 @@ done
 claude pane이 `[crosstalk] <agent> R<N> done — RUN_ID=...` 메시지를 받으면:
 
 1. RUN_ID / AGENT / ROUND 파싱
-2. `$RUN_DIR/state.sh` source 해서 컨텍스트 복원 (참가자 목록, 현재 라운드)
+2. **manifest.json**에서 컨텍스트 복원:
+   ```bash
+   MANIFEST="/tmp/crosstalk/run-${RUN_ID}/manifest.json"
+   AGENTS=($(jq -r '.agents[]' "$MANIFEST"))
+   CURRENT_ROUND=$(jq -r '.current_round' "$MANIFEST")
+   MODE=$(jq -r '.mode' "$MANIFEST")
+   ```
 3. **모든 참가자 ping 도착 확인**:
    ```bash
    ROUND_PADDED=$(printf '%02d' "$ROUND")
@@ -176,7 +204,15 @@ EOF
 
 > Claude가 정리하는 "핵심 이견"은 *각 답변에서 발췌한 표현 기반*이어야 한다 — 새 해석 추가 X.
 
-각 참가자에게 fan-out 후 슬래시 커맨드 종료. 다음 라운드는 다음 ping callback에서 진입.
+각 참가자에게 fan-out 후, **manifest의 current_round를 증가**시키고 슬래시 커맨드 종료:
+
+```bash
+NEXT_ROUND=$((CURRENT_ROUND + 1))
+TMP=$(mktemp)
+jq --argjson r "$NEXT_ROUND" '.current_round = $r' "$MANIFEST" > "$TMP" && mv "$TMP" "$MANIFEST"
+```
+
+다음 라운드는 다음 ping callback에서 진입.
 
 ## 7단계: 종료 조건 검사
 
