@@ -429,6 +429,56 @@ case "$CMD" in
     echo "$LAST_DIR"
     ;;
 
+  gc)
+    # 'crosstalk gc [--days N] [--dry-run]'
+    # 기본: 30일. /tmp/crosstalk/run-*, ~/.crosstalk/last 의 오래된 것 정리.
+    # ~/.crosstalk/last 는 항상 최신 1개 보존 — 30일 지나도 안 지움 (사용자가 마지막 결과 보고싶을 수 있으니).
+    GC_DAYS=30
+    GC_DRY=0
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --days) GC_DAYS="$2"; shift 2 ;;
+        --dry-run) GC_DRY=1; shift ;;
+        *) echo "ERROR: unknown gc flag: $1" >&2; exit 1 ;;
+      esac
+    done
+    case "$GC_DAYS" in
+      ''|*[!0-9]*) echo "ERROR: --days must be a positive integer" >&2; exit 1 ;;
+    esac
+    [ "$GC_DAYS" -lt 1 ] && { echo "ERROR: --days must be >= 1" >&2; exit 1; }
+
+    CROSSTALK_ROOT="${CROSSTALK_ROOT:-/tmp/crosstalk}"
+    DELETED=0
+    KEPT=0
+
+    if [ -d "$CROSSTALK_ROOT" ]; then
+      # find -mtime +N : N일 *초과* 경과한 것
+      for D in $(find "$CROSSTALK_ROOT" -maxdepth 1 -type d -name 'run-*' -mtime +"$GC_DAYS" 2>/dev/null); do
+        if [ "$GC_DRY" = "1" ]; then
+          echo "[dry-run] would remove: $D"
+        else
+          rm -rf "$D"
+          echo "removed: $D"
+        fi
+        DELETED=$((DELETED + 1))
+      done
+      KEPT=$(find "$CROSSTALK_ROOT" -maxdepth 1 -type d -name 'run-*' 2>/dev/null | wc -l | tr -d ' ')
+    fi
+
+    # pending.json 도 30일 지났으면 정리 (오래된 보존 topic)
+    PENDING_FILE="$HOME/.claude/crosstalk/pending.json"
+    if [ -f "$PENDING_FILE" ] && find "$PENDING_FILE" -mtime +"$GC_DAYS" 2>/dev/null | grep -q .; then
+      if [ "$GC_DRY" = "1" ]; then
+        echo "[dry-run] would remove stale pending: $PENDING_FILE"
+      else
+        rm -f "$PENDING_FILE"
+        echo "removed stale pending: $PENDING_FILE"
+      fi
+    fi
+
+    echo "summary: deleted=$DELETED kept=$KEPT (cutoff=${GC_DAYS}d, last=$HOME/.crosstalk/last 보존)"
+    ;;
+
   show-last)
     # 마지막 run 경로 한 줄 + 1줄 요약 (analysis.md or summary.md 첫 의미 있는 줄)
     LAST_DIR="$HOME/.crosstalk/last"
