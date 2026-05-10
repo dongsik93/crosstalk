@@ -70,7 +70,15 @@ Crosstalk — readiness
 1. **readiness 체크** (위와 동일 — 빠르게 한 번)
 2. **준비 미완료면 인라인 처리**:
    - `installed=missing` → `/crosstalk:install` 본문을 *지금 실행*. 사용자에게 "1회 설치가 필요합니다. 계속할까요?" AskUserQuestion. 거부 시 종료.
-   - `cmux=outside` → cmux 자동 시작 안내 (가능하면 그 자리에서, 불가능하면 "cmux 워크스페이스 안에서 다시 호출해주세요. 토픽은 보존했습니다."). topic을 `~/.claude/crosstalk/pending.json`에 저장 (v0.2.6 기능 — v0.2.5에서는 안내만).
+   - `cmux=outside` → topic 보존 + cmux 진입 안내:
+     ```bash
+     ~/.claude/scripts/crosstalk_bridge.sh pending-save "$TOPIC"
+     ```
+     ```
+     ⚠️  cmux 워크스페이스 밖입니다. topic을 보존했습니다.
+        다음: cmux 안에서 /crosstalk:resume
+     ```
+     → 종료. 사용자가 cmux 안에서 `/crosstalk:resume` 호출 시 그대로 이어짐.
    - `cmux=inside, peers=0` → `/crosstalk:launch` 본문 실행 (peer 자동 띄우기). 완료 후 자동으로 다음 단계 진행.
 3. **준비 완료** → `/crosstalk:analyze` 본문(`commands/analyze.md`)을 실행. `$ARGUMENTS`를 그대로 전달.
 

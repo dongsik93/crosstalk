@@ -383,6 +383,69 @@ case "$CMD" in
     esac
     ;;
 
+  pending-save)
+    # cmux 외부 호출 시 topic 보존. 'crosstalk pending-save <topic>'
+    TOPIC="${1:?topic required}"
+    PENDING_DIR="$HOME/.claude/crosstalk"
+    mkdir -p "$PENDING_DIR"
+    PENDING_FILE="$PENDING_DIR/pending.json"
+    # jq -n 으로 안전하게 JSON 인코딩
+    jq -n --arg topic "$TOPIC" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      '{topic: $topic, saved_at: $ts}' > "$PENDING_FILE"
+    echo "$PENDING_FILE"
+    ;;
+
+  pending-load)
+    # 저장된 topic 출력 (없으면 빈 출력 + exit 1)
+    PENDING_FILE="$HOME/.claude/crosstalk/pending.json"
+    if [ ! -f "$PENDING_FILE" ]; then
+      exit 1
+    fi
+    jq -r '.topic // empty' "$PENDING_FILE" 2>/dev/null
+    ;;
+
+  pending-clear)
+    PENDING_FILE="$HOME/.claude/crosstalk/pending.json"
+    [ -f "$PENDING_FILE" ] && rm -f "$PENDING_FILE"
+    echo "OK pending cleared"
+    ;;
+
+  register-last)
+    # 'crosstalk register-last <RUN_ID>'
+    # /tmp는 macOS 정리 정책에 영향받으므로, 영구 위치(~/.crosstalk/last)에 메타데이터 + 마지막 run 사본을 둔다.
+    RUN_ID="${1:?run-id required}"
+    validate_run_id "$RUN_ID" || exit 1
+    CROSSTALK_ROOT="${CROSSTALK_ROOT:-/tmp/crosstalk}"
+    SRC_DIR="$CROSSTALK_ROOT/run-$RUN_ID"
+    if [ ! -d "$SRC_DIR" ]; then
+      echo "ERROR: run dir not found: $SRC_DIR" >&2
+      echo "Next: 'crosstalk_bridge.sh start-run' 으로 새 run 만든 뒤 호출." >&2
+      exit 1
+    fi
+    LAST_DIR="$HOME/.crosstalk/last"
+    mkdir -p "$HOME/.crosstalk"
+    rm -rf "$LAST_DIR"
+    cp -R "$SRC_DIR" "$LAST_DIR"
+    echo "$LAST_DIR"
+    ;;
+
+  show-last)
+    # 마지막 run 경로 한 줄 + 1줄 요약 (analysis.md or summary.md 첫 의미 있는 줄)
+    LAST_DIR="$HOME/.crosstalk/last"
+    if [ ! -d "$LAST_DIR" ]; then
+      echo "no previous run"
+      exit 1
+    fi
+    echo "$LAST_DIR"
+    for f in analysis.md summary.md; do
+      if [ -s "$LAST_DIR/$f" ]; then
+        # 빈 줄/마크다운 헤더 건너뛰고 첫 본문 한 줄
+        grep -m1 -E '^[^#[:space:]]' "$LAST_DIR/$f" 2>/dev/null
+        break
+      fi
+    done
+    ;;
+
   ensure-presets)
     LANG="${1:?language required (en|ko)}"
     case "$LANG" in en|ko) ;; *) echo "ERROR: invalid language '$LANG'" >&2; exit 1 ;; esac
