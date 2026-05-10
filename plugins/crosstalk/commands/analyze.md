@@ -8,7 +8,7 @@ argument-hint: <분석 주제 / 자료 본문>
 
 ## 컨셉
 
-사용자가 던진 주제를 **각 참가자(claude + 켜져있는 peer 전원)가 독립적으로 분석**하고, 결과를 비교한다. 사회자(중재자)가 따로 없다 — 호출한 본인(Claude)이 fan-out + 비교표 출력 책임만 진다.
+사용자가 던진 주제를 **각 참가자(호출자 + 켜져있는 peer 전원)가 독립적으로 분석**하고, 결과를 비교한다. 사회자(중재자)가 따로 없다 — 호출한 본인이 fan-out + 비교표 출력 책임만 진다.
 
 **핵심 원칙**:
 
@@ -100,8 +100,14 @@ echo "📁 run dir: $RUN_DIR"
 `start-run`이 자동으로 `moderator_surface`를 manifest에 박는다. 추가로 *참가자 목록 + 모드*를 manifest에 머지한다 (callback 재진입 시 컨텍스트 복원용):
 
 ```bash
-# AGENTS = claude + 감지된 peer kinds
-AGENTS=("claude")
+# AGENTS = 호출자(moderator_kind) + 감지된 peer kinds
+MODERATOR_KIND=$(jq -r '.moderator_kind // "claude"' "$MANIFEST")
+case "$MODERATOR_KIND" in
+  claude|codex) ;;
+  *) MODERATOR_KIND="claude" ;;
+esac
+
+AGENTS=("$MODERATOR_KIND")
 for p in $PEERS; do
   AGENTS+=("${p#*|}")
 done
@@ -167,12 +173,12 @@ done
 > 메시지에서 `<AGENT>`는 각 peer 이름으로 치환. RUN_ID는 실제 값으로 치환.
 > 사용자 원문 `$TOPIC`는 *압축/요약/재해석 없이* 그대로 박는다.
 
-**Claude 본인도 동일 자료로 분석 시작** (다른 peer 답변 보지 않은 상태에서):
+**호출자 본인도 동일 자료로 분석 시작** (다른 peer 답변 보지 않은 상태에서):
 - 위 답변 형식대로 자기 분석을 작성
-- `cat > $RUN_DIR/responses/claude-r01.md <<'EOF' ... EOF`
-- `~/.claude/scripts/crosstalk_bridge.sh ping $RUN_ID claude 1`
+- `cat > $RUN_DIR/responses/${MODERATOR_KIND}-r01.md <<'EOF' ... EOF`
+- `~/.claude/scripts/crosstalk_bridge.sh ping $RUN_ID $MODERATOR_KIND 1`
 
-> **중요**: Claude도 다른 peer ping 도착하기 *전에* 자기 답을 마쳐야 한다. 본인 의견을 먼저 박은 뒤 비교 단계로 가야 비교가 공정함.
+> **중요**: 호출자도 다른 peer ping 도착하기 *전에* 자기 답을 마쳐야 한다. 본인 의견을 먼저 박은 뒤 비교 단계로 가야 비교가 공정함.
 
 ## 4단계: 슬래시 커맨드 종료 (callback 대기)
 
@@ -180,7 +186,10 @@ callback 모델 — 한 라운드만 발송하고 슬래시 커맨드 종료. pi
 
 ## 5단계: callback 핸들링 — 결론 비교
 
-claude pane이 `[crosstalk] <agent> R<N> done — RUN_ID=...` 메시지를 받으면:
+호출자 pane이 callback 메시지를 받으면:
+
+- Claude caller: `[crosstalk] <agent> R<N> done — RUN_ID=...`
+- Codex caller: `$crosstalk callback RUN_ID=... AGENT=... ROUND=... RESP=...`
 
 1. RUN_ID / AGENT / ROUND 파싱
 2. **manifest.json**에서 컨텍스트 복원:
@@ -225,11 +234,11 @@ claude pane이 `[crosstalk] <agent> R<N> done — RUN_ID=...` 메시지를 받�
 
 현재 분기 상황:
 
-🟦 claude:  <한 줄 결론>
+🟦 ${MODERATOR_KIND}: <한 줄 결론>
 🟧 codex:   <한 줄 결론>
 🟪 gemini:  <한 줄 결론>   ← 3자일 때만
 
-핵심 이견: <어느 가정/우선순위에서 갈렸는지 — Claude가 한 줄 정리>
+핵심 이견: <어느 가정/우선순위에서 갈렸는지 — 호출자가 한 줄 정리>
 
 너의 선택 (자유 형식 가능, 다음 중 하나로 끝낼 것):
   (a) 입장 유지 + 새 근거 추가
@@ -244,7 +253,7 @@ EOF
 ~/.claude/scripts/crosstalk_bridge.sh ping ${RUN_ID} <AGENT> ${NEXT_ROUND}
 ```
 
-> Claude가 정리하는 "핵심 이견"은 *각 답변에서 발췌한 표현 기반*이어야 한다 — 새 해석 추가 X.
+> 호출자가 정리하는 "핵심 이견"은 *각 답변에서 발췌한 표현 기반*이어야 한다 — 새 해석 추가 X.
 
 각 참가자에게 fan-out 후, **manifest의 current_round를 증가**시키고 슬래시 커맨드 종료:
 
@@ -302,7 +311,7 @@ done
 - ...
 
 라운드별 입장 변화 (간략):
-- R1: claude=X, codex=Y
+- R1: <moderator>=X, codex=Y
 - R2: 전원=X
 ```
 
@@ -310,7 +319,7 @@ done
 ```
 🤝 존중 분기 (${ROUND} 라운드, 합의 불가 — 가치/우선순위 차이)
 
-🟦 claude:  <결론> (근거: ...) [verdict: ${VERDICT}, conf: ${CONF}]
+🟦 <moderator>: <결론> (근거: ...) [verdict: ${VERDICT}, conf: ${CONF}]
 🟧 codex:   <결론> (근거: ...) [verdict: ${VERDICT}, conf: ${CONF}]
 🟪 gemini:  <결론> (근거: ...) [verdict: ${VERDICT}, conf: ${CONF}]
 
@@ -325,7 +334,7 @@ done
 ⚠️ 10 라운드 도달 — 강제 종료
 
 각 참가자 마지막 입장:
-🟦 claude:  ...
+🟦 <moderator>: ...
 🟧 codex:   ...
 🟪 gemini:  ...
 
@@ -359,13 +368,13 @@ echo "📁 last: $LAST_DIR  (또는 $RUN_DIR)"
 /tmp/crosstalk/run-<RUN_ID>/
   manifest.json       # mode=analyze + moderator + peers + agents + current_round (단일 진실)
   done/
-    claude-r01        # ping 마커
+    <moderator>-r01   # ping 마커
     codex-r01
     gemini-r01
-    claude-r02
+    <moderator>-r02
     ...
   responses/
-    claude-r01.md     # 라운드별 답변 본문
+    <moderator>-r01.md # 라운드별 답변 본문
     codex-r01.md
     gemini-r01.md
     ...
@@ -375,6 +384,6 @@ echo "📁 last: $LAST_DIR  (또는 $RUN_DIR)"
 ## 주의
 
 - **사용자 원문은 절대 가공하지 마라.** 압축/요약/재해석 = 지식 오염.
-- **사회자가 의견 추가하지 마라.** Claude 본인 분석은 자기 ping으로 들어가는 것이지, 비교표에 추가 코멘트 X.
+- **사회자가 의견 추가하지 마라.** 호출자 본인 분석은 자기 ping으로 들어가는 것이지, 비교표에 추가 코멘트 X.
 - **합의를 강요하지 마라.** 존중 분기는 정상 종료. 합의가 늘 옳은 결과는 아니다.
-- 핑퐁 메시지의 "핵심 이견" 한 줄은 각 답변 표현 발췌. Claude의 새 해석 X.
+- 핑퐁 메시지의 "핵심 이견" 한 줄은 각 답변 표현 발췌. 호출자의 새 해석 X.

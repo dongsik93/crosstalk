@@ -4,14 +4,14 @@
     "name": "dongsik93"
   },
   "metadata": {
-    "description": "Multi-agent analysis and co-work via cmux split panes — fan out one question, or hand out a parallel assignment, and let each CLI's own /goal carry it.",
-    "version": "0.4.0"
+    "description": "Multi-agent analysis and co-work via cmux split panes — fan out one question from Claude or Codex, or hand out a parallel assignment.",
+    "version": "0.5.0"
   },
   "plugins": [
     {
       "name": "crosstalk",
-      "description": "cmux-based multi-agent analysis + co-work (analyze / cowork / cowork-stop / resume / review / setup / launch / install / rules / persona / status).",
-      "version": "0.4.0",
+      "description": "cmux-based multi-agent analysis + co-work with Claude slash commands and experimental Codex caller support via $crosstalk.",
+      "version": "0.5.0",
       "author": {
         "name": "dongsik93"
       },

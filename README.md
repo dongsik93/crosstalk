@@ -1,24 +1,25 @@
 # Crosstalk
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.4.0-blue)
+![Version](https://img.shields.io/badge/version-0.5.0-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-black)
 
-Multi-agent analysis *and* co-work from one Claude Code slash command. Ask once and each CLI analyzes independently; or hand out an assignment and each CLI delivers its piece in parallel — both modes ship with deterministic verdicts and a one-line stop button.
+Multi-agent analysis *and* co-work from one Claude Code slash command or Codex skill call. Ask once and each CLI analyzes independently; or hand out an assignment and each CLI delivers its piece in parallel — both modes ship with deterministic verdicts and a one-line stop button.
 
 ![Crosstalk hero](docs/hero.png)
 
 ## Overview
 
-Crosstalk is a Claude Code plugin that coordinates multiple AI CLIs inside [cmux](https://www.cmux.dev/) split panes. You ask once, each peer analyzes independently, and Crosstalk compares their conclusions — consensus or respectful divergence, no forced agreement.
+Crosstalk coordinates multiple AI CLIs inside [cmux](https://www.cmux.dev/) split panes. You ask once from Claude Code (`/crosstalk`) or Codex (`$crosstalk`), each peer analyzes independently, and Crosstalk compares their conclusions — consensus or respectful divergence, no forced agreement.
 
-Unlike headless multi-agent tools, Crosstalk keeps the work visible. You watch each CLI respond in its own pane while one Claude session fans out the question and collects the verdicts.
+Unlike headless multi-agent tools, Crosstalk keeps the work visible. You watch each CLI respond in its own pane while the caller pane fans out the question and collects the verdicts.
 
 ## Features
 
 - **Use your existing CLI subscriptions**: no separate API keys or per-token integration required.
 - **Visible multi-agent workflow**: Claude, Codex, and Gemini run in neighboring cmux panes.
+- **Codex caller support** *(v0.5.0+ experimental)*: Codex can start runs with `$crosstalk`, and bridge callbacks re-enter through `$crosstalk callback ...`.
 - **Independent analysis, no knowledge pollution**: the user's raw input is fan-out unchanged — no moderator summary, no agenda setting.
 - **Deterministic verdict extraction**: `[AGREE]` / `[RESPECT_DISAGREE]` markers are parsed by the bridge, not interpreted by an LLM.
 - **File-based response transport**: responses are written to `/tmp/crosstalk/run-*/responses/*.md`, avoiding terminal scrollback loss for long answers.
@@ -85,6 +86,7 @@ This installs:
 
 - `~/.claude/scripts/crosstalk_bridge.sh`
 - `~/.claude/commands/crosstalk.md`
+- `~/.codex/skills/crosstalk/`
 - built-in rules and personas under `~/.claude/crosstalk/`
 
 ## Quick Start
@@ -95,7 +97,13 @@ Just type your question:
 /crosstalk Should this Android project use Compose or XML?
 ```
 
-That's it. If anything is missing (cmux not running, no peer CLIs in the workspace), `/crosstalk` will tell you the next single action and **preserve your topic** — you don't need to retype it. From cmux, run `/crosstalk:resume` to pick up where you left off (v0.2.6+).
+From a Codex pane, use the skill entrypoint:
+
+```text
+$crosstalk Should this Android project use Compose or XML?
+```
+
+That's it. If anything is missing (cmux not running, no peer CLIs in the workspace), `/crosstalk` or `$crosstalk` will tell you the next single action and **preserve your topic** — you don't need to retype it. From cmux, run `/crosstalk:resume` or `$crosstalk resume` to pick up where you left off (v0.2.6+).
 
 To check status without starting a run:
 
@@ -134,6 +142,19 @@ Deep PR review is experimental — `/crosstalk:review --deep 1440` checks out th
 | `/crosstalk:status` | Show active rules, personas, and pane status. |
 | `/crosstalk:install` / `/crosstalk:uninstall` | Install or remove Crosstalk components. |
 
+### Codex caller (v0.5.0+ experimental)
+
+Run these from a Codex pane after `/crosstalk:install` has installed `~/.codex/skills/crosstalk/`.
+
+| Command | Description |
+| --- | --- |
+| `$crosstalk <topic>` | Codex caller entrypoint. Runs analyze and uses Codex as the moderator. |
+| `$crosstalk analyze [--rules <name>] [--persona <name>] <topic>` | Explicit analyze from Codex. |
+| `$crosstalk cowork "claude=A, gemini=B, goal=Y"` | Start co-work mode from Codex. |
+| `$crosstalk cowork-stop [RUN_ID]` | Stop an in-flight cowork run from Codex. |
+| `$crosstalk resume` | Resume a preserved topic from Codex. |
+| `$crosstalk status` | Show setup and pane status from Codex. |
+
 ### Advanced
 
 These exist for manual control or recovery — you typically don't need them.
@@ -148,9 +169,9 @@ These exist for manual control or recovery — you typically don't need them.
 | `/crosstalk:review [PR]` | Moderator-driven PR review using `gh pr diff`. |
 | `/crosstalk:review --deep [PR]` | Experimental deep PR review with checkout/stash/restore. |
 
-## How It Works (v0.3.0)
+## How It Works (v0.5.0)
 
-1. **Fan-out, raw**: Crosstalk scans the cmux workspace for peer AI panes and sends each peer the user's topic *unchanged*. No moderator summary, no agenda. Claude itself also analyzes in parallel as one more participant.
+1. **Fan-out, raw**: Crosstalk scans the cmux workspace for peer AI panes and sends each peer the user's topic *unchanged*. No moderator summary, no agenda. The caller itself also analyzes in parallel as one more participant.
 2. **Independent answers in parallel**: each peer writes its analysis to a response file:
    ```bash
    cat > /tmp/crosstalk/run-<RUN_ID>/responses/<agent>-r<NN>.md <<'EOF'
@@ -158,7 +179,7 @@ These exist for manual control or recovery — you typically don't need them.
    EOF
    ~/.claude/scripts/crosstalk_bridge.sh ping <RUN_ID> <agent> <round>
    ```
-3. **Callback wakes the moderator**: `bridge ping` reads the manifest, finds the calling Claude pane, and sends a callback message with the response file path. Claude exits the slash command between rounds — no polling, no idle bash process.
+3. **Callback wakes the moderator**: `bridge ping` reads the manifest, finds the caller pane, and sends a callback message with the response file path. Claude callers receive the legacy `[crosstalk] ...` message; Codex callers receive `$crosstalk callback RUN_ID=... AGENT=... ROUND=... RESP=...`. The caller exits between rounds — no polling, no idle bash process.
 4. **Deterministic verdict extraction**: when all peers ping, the bridge runs `extract-verdict` on each response file to parse `[AGREE]` / `[RESPECT_DISAGREE: reason]` / `confidence: high|medium|low` markers. The LLM does not interpret consensus.
 5. **Compare or ping-pong**:
    - All `verdict=AGREE` → consensus. Print combined conclusion.
@@ -174,7 +195,7 @@ Example run directory:
 
 ```text
 /tmp/crosstalk/run-PpP6hTWx/
-  manifest.json          # includes moderator_surface, mode, agents, current_round
+  manifest.json          # includes moderator_surface, moderator_kind, mode, agents, current_round
   done/
     codex-r01            # ping markers (also kept for debugging)
     gemini-r01
@@ -265,11 +286,12 @@ Custom presets live here (each rule/persona file is loaded into the preamble ver
 - **Peer must call `bridge ping`**: completion is event-based — if a peer never pings, the moderator stays idle. You can manually call `bridge ping <RUN_ID> <agent> <round>` from any pane to unblock.
 - **AI may ignore transport instructions**: opt-in `--transport file/screen` modes treat this as a protocol error with retry/skip/stop choices.
 - **Deep PR review is experimental**: it touches the current git worktree through checkout/stash/restore.
-- **Claude-only moderation**: Codex/Gemini moderator mode is not supported yet.
+- **Codex caller is experimental**: `$crosstalk` uses Codex skills and cmux callback injection. Verify callback behavior with your Codex/cmux version before relying on long ping-pong or cowork runs.
+- **Gemini caller is not supported yet**: Gemini can participate as a peer.
 
 ## Roadmap
 
-- Codex and Gemini moderator modes
+- Gemini moderator mode
 - Additional CLI adapters
 - tmux and zellij support
 - Better troubleshooting docs

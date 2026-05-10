@@ -16,7 +16,7 @@ argument-hint: [--no-worktree] [--max-time <duration>] "claude=A 작업, codex=B
   ```
   /crosstalk:cowork "claude=Repository 레이어, codex=ViewModel 레이어, goal=메일 검색 기능 완성하고 unit test 통과"
   ```
-  명시적 형식이 어려우면 자유 텍스트로 던져도 사회자(Claude)가 분배 시도.
+  명시적 형식이 어려우면 자유 텍스트로 던져도 호출자가 분배 시도.
 
 ## 전제 조건
 
@@ -56,23 +56,46 @@ PEERS=$(printf '%s\n' "$PEERS_RAW" | awk -F'\t' '$2 ~ /^(claude|codex|gemini)$/ 
 
 `PEERS` 비어있으면 `/crosstalk:launch` 안내 후 종료.
 
-## 3단계: 작업 분담 자동 분배
+## 3단계: run 디렉토리 + 참가자 목록 생성
 
-자유 텍스트 `TASK_BODY`를 사회자(Claude)가 한 번 해석해서 *각 peer별 분담* + *공통 goal*로 정리.
+```bash
+RUN_ID=$(~/.claude/scripts/crosstalk_bridge.sh start-run)
+RUN_DIR="/tmp/crosstalk/run-${RUN_ID}"
+MANIFEST="$RUN_DIR/manifest.json"
+
+MODERATOR_KIND=$(jq -r '.moderator_kind // "claude"' "$MANIFEST")
+case "$MODERATOR_KIND" in
+  claude|codex) ;;
+  *) MODERATOR_KIND="claude" ;;
+esac
+
+AGENTS=("$MODERATOR_KIND")
+for p in $PEERS; do
+  AGENTS+=("${p#*|}")
+done
+```
+
+`start-run`이 `moderator_surface`, `moderator_kind`를 manifest에 박는다. Claude caller는 기존처럼 `claude`, Codex caller는 `$crosstalk` skill 경로에서 `codex`가 된다.
+
+## 4단계: 작업 분담 자동 분배
+
+자유 텍스트 `TASK_BODY`를 호출자가 한 번 해석해서 *각 참가자별 분담* + *공통 goal*로 정리.
 
 규칙:
 - "claude=X, codex=Y, goal=Z" 같은 명시 형식이면 그대로 파싱.
-- 명시 안 됐으면 사회자가 적당히 분배. peer 수에 맞춰 균등 분담. goal은 전체 작업 완료 조건으로 설정.
-- 사회자도 작업 참여 — Claude는 자기 분담 + 진행자 1인 2역.
+- 명시 안 됐으면 호출자가 적당히 분배. 참가자 수에 맞춰 균등 분담. goal은 전체 작업 완료 조건으로 설정.
+- 호출자도 작업 참여 — 자기 분담 + 진행자 1인 2역.
 
 결과를 manifest에 머지:
 ```bash
-jq --arg goal "..." --argjson assignments '{...}' \
-   '. + {mode: "cowork", goal: $goal, assignments: $assignments}' \
+jq --arg goal "..." \
+   --argjson assignments '{...}' \
+   --argjson agents "$(printf '%s\n' "${AGENTS[@]}" | jq -R . | jq -s .)" \
+   '. + {mode: "cowork", goal: $goal, assignments: $assignments, agents: $agents, current_round: 1}' \
    "$MANIFEST" > "$TMP" && mv "$TMP" "$MANIFEST"
 ```
 
-## 4단계: worktree 격리 (USE_WORKTREE=true)
+## 5단계: worktree 격리 (USE_WORKTREE=true)
 
 사용자에게 확인 (AskUserQuestion):
 
@@ -101,7 +124,7 @@ jq --argjson wt "$WT_JSON" '.worktrees = $wt' "$MANIFEST" > "$TMP" && mv "$TMP" 
 `shared` 선택: 모든 peer의 작업 디렉토리 = `$(pwd)`.
 `cancel`: 즉시 종료.
 
-## 5단계: fan-out (각 peer에 작업 + /goal 발동)
+## 6단계: fan-out (각 peer에 작업 + /goal 발동)
 
 각 peer에 다음 메시지를 cmux send:
 
@@ -154,21 +177,21 @@ for entry in "${PEERS[@]}"; do
 done
 ```
 
-**Claude 본인**도 동등하게 작업:
+**호출자 본인**도 동등하게 작업:
 - worktree 또는 현재 디렉토리로 이동
 - 자기 분담 작업 진행 (이 슬래시 커맨드 종료 후, 사용자가 다시 호출하면 진행)
-- 단, Claude는 슬래시 커맨드 호출자라 *진행 모니터링*도 같이 맡음 — callback 시 통합 보고 작성
+- 단, 호출자는 *진행 모니터링*도 같이 맡음 — callback 시 통합 보고 작성
 
-## 6단계: 슬래시 커맨드 종료 → callback 대기
+## 7단계: 슬래시 커맨드 종료 → callback 대기
 
 분기:
-- 모든 peer ping 도착 → 7단계 (정상 종료)
-- max_time 초과 → 8단계 (강제 종료)
-- 사용자가 `/crosstalk:cowork-stop` 호출 → 8단계 (사용자 stop)
+- 모든 peer ping 도착 → 8단계 (정상 종료)
+- max_time 초과 → 9단계 (강제 종료)
+- 사용자가 `/crosstalk:cowork-stop` 호출 → 9단계 (사용자 stop)
 
 callback 메시지에서 RUN_ID 파싱 후 manifest 읽어 컨텍스트 복원.
 
-## 7단계: 정상 종료 — 결과 통합
+## 8단계: 정상 종료 — 결과 통합
 
 모든 peer 응답 파일 (`responses/<agent>-r01.md`) 읽어 통합 보고 작성:
 
@@ -209,7 +232,7 @@ worktree 정리 옵션 제시 (AskUserQuestion):
 🌳 worktree 정리
 
 각 worktree:
-  - claude: <path> (N commits)
+  - <moderator>: <path> (N commits)
   - codex:  <path> (N commits)
 
 다음 옵션:
@@ -222,14 +245,14 @@ worktree 정리 옵션 제시 (AskUserQuestion):
 `merge`: 각 브랜치를 현재 브랜치로 cherry-pick 시도. 충돌 시 즉시 중단 + keep으로 폴백.
 `drop`: `~/.claude/scripts/crosstalk_bridge.sh cleanup-worktrees $RUN_ID` 호출 + 브랜치 삭제 확인.
 
-## 8단계: 강제 종료 (timeout 또는 사용자 stop)
+## 9단계: 강제 종료 (timeout 또는 사용자 stop)
 
 ```bash
 ~/.claude/scripts/crosstalk_bridge.sh notify-stop "$RUN_ID"
 ```
 
 → 모든 peer에 `/goal clear` + 종료 메시지 cmux send.
-→ 5초 대기 후 7단계와 동일한 결과 수집 (응답 파일이 있는 만큼만 수집).
+→ 5초 대기 후 8단계와 동일한 결과 수집 (응답 파일이 있는 만큼만 수집).
 → 통합 보고 끝에 "⚠️ 강제 종료 — 일부 작업 미완" 표시.
 
 ## 디렉토리 구조
@@ -238,21 +261,21 @@ worktree 정리 옵션 제시 (AskUserQuestion):
 /tmp/crosstalk/run-<RUN_ID>/
   manifest.json       # mode=cowork + goal + assignments + worktrees
   done/
-    claude-r01
+    <moderator>-r01
     codex-r01
   responses/
-    claude-r01.md     # 각자 작업 보고
+    <moderator>-r01.md # 각자 작업 보고
     codex-r01.md
   cowork-summary.md   # 통합 보고
 
 /tmp/crosstalk/worktrees/run-<RUN_ID>/
-  claude/             # git worktree (브랜치 cowork/<RUN_ID>-claude)
+  <moderator>/        # git worktree (브랜치 cowork/<RUN_ID>-<moderator>)
   codex/              # git worktree (브랜치 cowork/<RUN_ID>-codex)
 ```
 
 ## 주의
 
-- **MVP는 cross-check 없음**. peer끼리 서로 진행을 모름. 끝나면 사회자가 합침.
+- **MVP는 cross-check 없음**. peer끼리 서로 진행을 모름. 끝나면 호출자가 합침.
 - **자동 머지 X (기본)**: 충돌 위험 때문에 사용자 수동 검토가 안전.
 - **goal 검증은 각 CLI의 `/goal` 책임**. Crosstalk은 LLM 판정/명령 검증/사용자 확인 어느 것도 안 한다.
 - **max_time이 절대 캡**: peer의 `/goal`이 무한 진행해도 외부에서 깰 수 있게 보장.

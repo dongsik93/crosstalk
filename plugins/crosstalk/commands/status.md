@@ -77,6 +77,7 @@ Crosstalk status
   /crosstalk <topic>
   /crosstalk --rules brainstorm <topic>
   /crosstalk --persona senior-junior <topic>
+  $crosstalk <topic>   (Codex caller, v0.5.0+ experimental)
 ```
 
 `LANGUAGE=ko`:
@@ -116,6 +117,7 @@ Crosstalk status
   /crosstalk --rules brainstorm <주제>            룰 일회성
   /crosstalk --persona senior-junior <주제>       페르소나 일회성
   /crosstalk --rules debate --persona critic-builder <주제>   둘 다
+  $crosstalk <주제>                               Codex caller (v0.5.0+ experimental)
 ```
 
 cmux 명령 raw 출력은 노출 X. 깔끔한 요약만.

@@ -1,7 +1,7 @@
 {
   "name": "crosstalk",
-  "version": "0.4.0",
-  "description": "Multi-agent analysis + co-work slash commands powered by cmux split panes. Claude, Codex, and Gemini analyze together or deliver in parallel via per-peer /goal.",
+  "version": "0.5.0",
+  "description": "Multi-agent analysis + co-work powered by cmux split panes, with Claude slash commands and experimental Codex caller support via $crosstalk.",
   "author": {
     "name": "dongsik93"
   }

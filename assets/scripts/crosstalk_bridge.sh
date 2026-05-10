@@ -39,7 +39,7 @@
 #   crosstalk_bridge.sh ping <run-id> <agent> <round>
 #                                                  → AI가 답변을 마치고 호출하는 "끝났어" 신호.
 #                                                  내부적으로 /tmp/crosstalk/run-<id>/done/<agent>-r<NN> 를 touch.
-#                                                  사회자(claude)는 wait-ping으로 즉시 감지.
+#                                                  사회자 pane에는 moderator_kind별 callback을 cmux send.
 #   crosstalk_bridge.sh wait-ping <run-id> <agent> <round>
 #                                                  → AI가 "답변 끝났음" 신호로 touch한 ping 파일을 기다린다.
 #                                                  ping 경로: /tmp/crosstalk/run-<id>/done/<agent>-r<NN>
@@ -49,6 +49,7 @@
 #
 # v0.1.4 file-based transport:
 #   crosstalk_bridge.sh start-run                       → 새 run-id 생성, /tmp/crosstalk/run-<id>/ 디렉토리 + manifest.json 생성
+#                                                       manifest에는 moderator_surface, moderator_kind 기록
 #                                                       stdout: <run-id>
 #   crosstalk_bridge.sh make-msg-id <run-id> <round> <agent> <attempt>
 #                                                       → run-<id>-r<NN>-<agent>-a<N> 형태의 msg-id 출력
@@ -718,8 +719,31 @@ case "$CMD" in
     RID="${BASENAME#run-}"              # XXXXXXXX
     mkdir -p "$RUN_DIR/responses" "$RUN_DIR/done"
 
-    # 사회자(=호출자=Claude) surface 식별. ping callback이 이 pane에 메시지 보낸다.
+    # 사회자(=호출자) surface/kind 식별. ping callback이 이 pane에 메시지 보낸다.
     MOD_SURFACE=$(self_surface 2>/dev/null || echo "")
+    MOD_KIND="${CROSSTALK_MODERATOR_KIND:-}"
+    if [ -z "$MOD_KIND" ] && [ -n "$MOD_SURFACE" ]; then
+      MOD_KIND=$("$0" detect "$MOD_SURFACE" 2>/dev/null || echo "unknown")
+    fi
+    case "$MOD_KIND" in
+      claude|codex) ;;
+      gemini)
+        rm -rf "$RUN_DIR"
+        echo "ERROR: Gemini caller mode is not supported in Crosstalk v0.5.0" >&2
+        echo "Next: start the run from Claude (/crosstalk) or Codex (\$crosstalk)." >&2
+        exit 1
+        ;;
+      ""|unknown)
+        # Backward-compatible fallback for Claude caller environments where UI detection fails.
+        MOD_KIND="claude"
+        ;;
+      *)
+        rm -rf "$RUN_DIR"
+        echo "ERROR: invalid moderator kind '$MOD_KIND' (expected claude/codex)" >&2
+        exit 1
+        ;;
+    esac
+
     # VERSION 파일 단일 진실. 우선순위: 사용자 설치본 > 마켓 캐시 > unknown.
     BRIDGE_VERSION="unknown"
     for V in "$HOME/.claude/crosstalk/VERSION" \
@@ -731,7 +755,8 @@ case "$CMD" in
   "run_id": "$RID",
   "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "version": "$BRIDGE_VERSION",
-  "moderator_surface": "$MOD_SURFACE"
+  "moderator_surface": "$MOD_SURFACE",
+  "moderator_kind": "$MOD_KIND"
 }
 EOF
     echo "$RID"
@@ -972,6 +997,7 @@ EOF
 
     # 2) 사회자 pane에 callback 메시지 전송
     MOD_SURFACE=$(jq -r '.moderator_surface // ""' "$MANIFEST" 2>/dev/null || echo "")
+    MOD_KIND=$(jq -r '.moderator_kind // "claude"' "$MANIFEST" 2>/dev/null || echo "claude")
     if [ -z "$MOD_SURFACE" ] || [ "$MOD_SURFACE" = "null" ]; then
       echo "WARN: moderator_surface not in manifest. ping marker only." >&2
       echo "Next: 사회자가 cmux 안에서 start-run을 호출했는지 확인 (cmux 외부에서는 surface가 식별되지 않음). 마커는 정상 기록됨." >&2
@@ -979,10 +1005,21 @@ EOF
       exit 0
     fi
 
-    # cmux send 로 사회자 pane 입력창에 메시지 박는다 → claude가 새 사용자 입력으로 받음
+    # cmux send 로 사회자 pane 입력창에 메시지 박는다 → 호출자 CLI가 새 사용자 입력으로 받음
     # v0.2.1+: 답변 본문은 응답 파일에 있다. 화면 캡처 X.
     RESP_PATH="$RUN_DIR/responses/$(printf '%s-r%02d' "$AGENT" "$ROUND").md"
-    CALLBACK_MSG="[crosstalk] $AGENT R$ROUND done — RUN_ID=$RUN_ID. 답변은 $RESP_PATH 에서 읽고 다음 라운드 진행해."
+    case "$MOD_KIND" in
+      codex)
+        CALLBACK_MSG="\$crosstalk callback RUN_ID=$RUN_ID AGENT=$AGENT ROUND=$ROUND RESP=$RESP_PATH"
+        ;;
+      claude|""|null|unknown)
+        CALLBACK_MSG="[crosstalk] $AGENT R$ROUND done — RUN_ID=$RUN_ID. 답변은 $RESP_PATH 에서 읽고 다음 라운드 진행해."
+        ;;
+      *)
+        echo "WARN: unsupported moderator_kind=$MOD_KIND. Falling back to Claude-style callback." >&2
+        CALLBACK_MSG="[crosstalk] $AGENT R$ROUND done — RUN_ID=$RUN_ID. 답변은 $RESP_PATH 에서 읽고 다음 라운드 진행해."
+        ;;
+    esac
     cmux send --surface "$MOD_SURFACE" "$CALLBACK_MSG" >/dev/null 2>&1
     cmux send-key --surface "$MOD_SURFACE" enter >/dev/null 2>&1
     sleep 0.5

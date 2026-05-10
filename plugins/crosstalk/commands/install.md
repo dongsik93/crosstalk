@@ -16,14 +16,18 @@ argument-hint: [--presets-only [--language en|ko]]
    - `~/.claude/commands/crosstalk.md` (단독 명령 `/crosstalk` 활성화)
    - `~/.claude/crosstalk/{rules,personas}/*.md` (토론 룰/페르소나 빌트인)
    - `~/.claude/crosstalk/config.json` (active 프리셋 추적)
+   - `~/.codex/skills/crosstalk/` (Codex caller용 `$crosstalk` skill)
 5. 인증 안내 (gh / 각 CLI 첫 실행 시 OAuth)
 
 ## 현재 범위
 
 - ✅ Claude Code 측 컴포넌트 자동 설치
+- ✅ Codex caller용 `$crosstalk` skill 설치
 - ✅ AI CLI npm 자동 설치 (claude/codex/gemini)
-- ⚠️ Codex가 사회자가 되는 시나리오는 미지원
-  - Codex pane은 *참여자*로만 동작 (Claude 사회자 토론에 응답)
+- ⚠️ Codex caller는 v0.5.0 experimental
+  - `$crosstalk` skill + bridge callback으로 동작
+  - 실제 callback 자동 진행은 cmux/Codex 버전 조합에서 확인 필요
+  - Codex CLI가 아직 없어도 skill 파일 설치 자체는 성공해야 함
 
 ---
 
@@ -280,6 +284,7 @@ mkdir -p ~/.claude/scripts
 mkdir -p ~/.claude/commands
 mkdir -p ~/.claude/crosstalk/rules/en ~/.claude/crosstalk/rules/ko
 mkdir -p ~/.claude/crosstalk/personas/en ~/.claude/crosstalk/personas/ko
+mkdir -p ~/.codex/skills/crosstalk
 
 # bridge 스크립트
 cp "$MARKETPLACE_ROOT/assets/scripts/crosstalk_bridge.sh" ~/.claude/scripts/
@@ -290,6 +295,19 @@ chmod +x ~/.claude/scripts/crosstalk_bridge.sh
 
 # 단독 명령 활성화 (/crosstalk)
 cp "$MARKETPLACE_ROOT/assets/user-commands/crosstalk.md" ~/.claude/commands/
+
+# Codex caller skill 활성화 ($crosstalk)
+# 사용자 편집 보존: 이미 있는 파일은 덮어쓰지 않고, 새 파일만 보충.
+if [ -d "$MARKETPLACE_ROOT/assets/codex-skills/crosstalk" ]; then
+  (cd "$MARKETPLACE_ROOT/assets/codex-skills/crosstalk" && find . -type f) | while read -r rel; do
+    src="$MARKETPLACE_ROOT/assets/codex-skills/crosstalk/$rel"
+    dst="$HOME/.codex/skills/crosstalk/$rel"
+    mkdir -p "$(dirname "$dst")"
+    if [ ! -f "$dst" ]; then
+      cp "$src" "$dst"
+    fi
+  done
+fi
 
 # 빌트인 룰/페르소나 (언어별, 이미 있으면 덮어쓰지 않음 — 사용자 편집 보존)
 for lang in en ko; do
@@ -316,6 +334,7 @@ done
   ✅ ~/.claude/commands/crosstalk.md (단독 명령 /crosstalk 활성화)
   ✅ ~/.claude/crosstalk/rules/{en,ko}/
   ✅ ~/.claude/crosstalk/personas/{en,ko}/
+  ✅ ~/.codex/skills/crosstalk/ (Codex $crosstalk skill)
   ✅ ~/.claude/crosstalk/config.json (language + active presets)
 ```
 
@@ -338,6 +357,7 @@ done
 설치된 항목:
   - ~/.claude/scripts/crosstalk_bridge.sh
   - ~/.claude/commands/crosstalk.md
+  - ~/.codex/skills/crosstalk/SKILL.md
   - interface language: ${LANGUAGE}
 
 (npm 자동 설치 진행 시) 추가 설치된 AI CLI:
@@ -353,6 +373,7 @@ done
 Next:
   /crosstalk:launch
   /crosstalk <topic>
+  $crosstalk <topic>   # Codex caller (experimental)
 
 Customize rules/personas:
   /crosstalk:status    ← 현재 active 룰/페르소나 확인

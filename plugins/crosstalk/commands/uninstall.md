@@ -11,7 +11,7 @@ argument-hint: (인자 없음)
 **제거 대상**:
 - `~/.claude/scripts/crosstalk_bridge.sh`
 - `~/.claude/commands/crosstalk.md` (단독 명령)
-- (v0.2 이후) `~/.codex/skills/crosstalk-*/`
+- (v0.5 이후) `~/.codex/skills/crosstalk/`
 
 **제거 안 함**:
 - 플러그인 자체 (마켓에서 install된 것) → `/plugin uninstall crosstalk` 사용
@@ -80,6 +80,7 @@ To remove the marketplace plugin itself:
 
 These remain installed unless removed manually:
   - npm packages: claude / codex / gemini
+  - Codex skill: ~/.codex/skills/crosstalk/
   - cmux
   - logs: ~/Documents/crosstalk/
 ```
@@ -93,6 +94,7 @@ ko:
 
 다음 항목은 그대로 남아있습니다 (필요시 직접 제거):
   - npm 패키지: claude / codex / gemini  (npm uninstall -g)
+  - Codex skill: ~/.codex/skills/crosstalk/
   - cmux: brew uninstall --cask cmux
   - 토론 로그: ~/Documents/crosstalk/  (필요시 rm -rf)
 ```
