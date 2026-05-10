@@ -16,13 +16,17 @@ argument-hint: <분석 주제 / 자료 본문>
 |---|---|---|
 | 사회자 | 있음 (Claude가 turn-taking 진행) | 없음 (Claude도 일반 분석가) |
 | 자료 가공 | 사회자가 요약/정리 | **사용자 원문 그대로 fan-out** (지식 오염 방지) |
-| 룰 | active rule 적용 | 룰 없음 (각자 자기 페이스) |
+| 룰/페르소나 | 매 턴 적용 | 옵션으로 1회만 주입 (선택) |
 | 합의 강제 | [AGREE]/[DISAGREE] turn마다 | 1라운드 분석 후 *대치 시에만* 핑퐁 |
 | 종료 | 라운드 한도 | 합의 / 존중 분기 / 하드 캡 10라운드 |
 
 ## 옵션
 
-옵션 없음. 자료 가공 없이 **사용자 입력 원문 그대로** 모든 참가자에게 fan-out한다.
+- `--rules <name>` — 일회성 룰 프리셋 (예: `default`, `brainstorm`, `debate`). 옵션 없으면 `~/.claude/crosstalk/config.json`의 `active_rules` 사용. `none` 지정 시 룰 섹션을 빼고 보낸다 (각자 자기 페이스).
+- `--persona <name>` — 일회성 페르소나 프리셋 (예: `senior-junior`, `critic-builder`, `triple-perspective`). `none` 지정 시 페르소나 섹션을 빼고 보낸다.
+- 자료 본문은 가공 없이 **사용자 원문 그대로** fan-out된다.
+
+룰/페르소나 본문은 active 파일에서 *그대로* 주입한다 — 압축/요약 X. 사용자가 룰 파일을 편집한 의도를 보존.
 
 ## 전제 조건
 
@@ -30,19 +34,49 @@ argument-hint: <분석 주제 / 자료 본문>
 - 본인 외 cmux split 안에 다른 AI CLI(Codex/Gemini) 1개 이상 있음 (없으면 `/crosstalk:launch` 안내 후 종료)
 - bridge 스크립트 설치 완료
 
-## 0단계: 인자 검증
+## 0단계: 옵션 파싱 + 룰/페르소나 로드
 
-`$ARGUMENTS`가 비어있으면 사용법 안내 후 종료:
+`$ARGUMENTS`에서 옵션 추출:
+- `--rules <name>` (있으면) → `RULES_NAME=<name>`
+- `--persona <name>` (있으면) → `PERSONA_NAME=<name>`
+- 나머지 텍스트 = `TOPIC` (가공 X)
+
+`TOPIC`이 비어있으면 사용법 안내 후 종료:
 
 ```
-사용법: /crosstalk:analyze <분석 주제 / 자료 본문>
+사용법: /crosstalk:analyze [--rules <name>] [--persona <name>] <분석 주제 / 자료 본문>
 
 예:
   /crosstalk:analyze 이 PR을 머지해도 안전한지 봐줘. <PR 본문>
   /crosstalk:analyze Compose vs XML — 우리 프로젝트 기준 어느 쪽이 나아?
+  /crosstalk:analyze --persona critic-builder 이 설계 어떻게 봐?
+  /crosstalk:analyze --rules debate 이 의사결정 진짜 맞나?
 ```
 
-`$ARGUMENTS` = `TOPIC` (그대로 사용, 가공 X).
+옵션 없으면 active 프리셋 로드:
+```bash
+CONFIG=~/.claude/crosstalk/config.json
+LANGUAGE=$(jq -r '.language // "en"' "$CONFIG" 2>/dev/null || echo "en")
+case "$LANGUAGE" in en|ko) ;; *) LANGUAGE="en" ;; esac
+ACTIVE_RULES=$(jq -r '.active_rules // "default"' "$CONFIG" 2>/dev/null || echo "default")
+ACTIVE_PERSONA=$(jq -r '.active_persona // "default"' "$CONFIG" 2>/dev/null || echo "default")
+RULES_NAME="${RULES_NAME:-$ACTIVE_RULES}"
+PERSONA_NAME="${PERSONA_NAME:-$ACTIVE_PERSONA}"
+```
+
+룰/페르소나 본문 로드 (자가치유: 디렉토리 비어있으면 마켓 캐시에서 자동 보충):
+```bash
+~/.claude/scripts/crosstalk_bridge.sh ensure-presets "$LANGUAGE" >/dev/null 2>&1 || true
+
+RULES_FILE="$HOME/.claude/crosstalk/rules/${LANGUAGE}/${RULES_NAME}.md"
+PERSONA_FILE="$HOME/.claude/crosstalk/personas/${LANGUAGE}/${PERSONA_NAME}.md"
+
+# none 또는 파일 없으면 빈 본문 (해당 섹션 생략)
+[ "$RULES_NAME" = "none" ] || [ ! -f "$RULES_FILE" ] && RULES_BODY="" || RULES_BODY=$(cat "$RULES_FILE")
+[ "$PERSONA_NAME" = "none" ] || [ ! -f "$PERSONA_FILE" ] && PERSONA_BODY="" || PERSONA_BODY=$(cat "$PERSONA_FILE")
+```
+
+> 룰/페르소나 본문은 *압축/요약하지 마라*. 사용자가 파일을 수정한 의도를 보존해야 한다.
 
 ## 1단계: peer 탐색
 
@@ -87,13 +121,21 @@ jq --arg mode analyze \
 
 ## 3단계: fan-out (모든 참가자에게 동일 메시지 전송)
 
-각 peer에게 다음 메시지를 *원문 가공 없이* 전송한다.
+각 peer에게 다음 메시지를 *원문 가공 없이* 전송한다. 페르소나/룰 본문이 비어있는 섹션은 통째로 뺀다.
 
 ```
 [Crosstalk analyze]
 
 다음 주제에 대한 너의 독립 분석을 듣고 싶다.
 다른 참가자가 무엇을 답할지 의식하지 말고 너의 결론을 내라.
+
+[페르소나 본문이 있을 때만]
+═══ 페르소나 (${PERSONA_NAME}) ═══
+${PERSONA_BODY}
+
+[룰 본문이 있을 때만]
+═══ 룰 (${RULES_NAME}) ═══
+${RULES_BODY}
 
 ═══ 주제 (사용자 원문) ═══
 ${TOPIC}
@@ -113,6 +155,8 @@ EOF
 
 ~/.claude/scripts/crosstalk_bridge.sh ping ${RUN_ID} <AGENT> 1
 ```
+
+> 페르소나/룰 섹션은 1라운드 fan-out에만 한 번 박는다. 핑퐁 라운드(6단계)에는 다시 박지 않는다 — 이미 컨텍스트에 살아있음.
 
 전송:
 ```bash
