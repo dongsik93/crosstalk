@@ -473,11 +473,17 @@ case "$CMD" in
 
     # 사회자(=호출자=Claude) surface 식별. ping callback이 이 pane에 메시지 보낸다.
     MOD_SURFACE=$(self_surface 2>/dev/null || echo "")
+    # VERSION 파일 단일 진실. 우선순위: 사용자 설치본 > 마켓 캐시 > unknown.
+    BRIDGE_VERSION="unknown"
+    for V in "$HOME/.claude/crosstalk/VERSION" \
+             "$HOME/.claude/plugins/marketplaces/crosstalk/VERSION"; do
+      [ -f "$V" ] && BRIDGE_VERSION=$(tr -d '[:space:]' < "$V") && break
+    done
     cat > "$RUN_DIR/manifest.json" <<EOF
 {
   "run_id": "$RID",
   "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "version": "0.2.1",
+  "version": "$BRIDGE_VERSION",
   "moderator_surface": "$MOD_SURFACE"
 }
 EOF
