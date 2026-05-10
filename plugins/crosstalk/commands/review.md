@@ -6,7 +6,7 @@ argument-hint: [--deep] [--rules <name>] [--persona <name>] [PR번호]
 
 # Crosstalk Review — 다중 AI PR 리뷰 토론
 
-`/crosstalk:debate`의 PR 리뷰 특화 버전.
+PR diff/branch를 자료로 공유하고, 사회자(Claude)가 turn-taking으로 진행하는 PR 리뷰 토론. analyze와 별개 흐름 — PR 리뷰는 *자료가 크고 사회자 정리가 필요해서* turn-taking 모델 유지.
 
 ## 두 모드
 
@@ -170,7 +170,7 @@ DIFF_LINES=$(wc -l < "$DIFF_PATH" | tr -d ' ')
 
 ## 4단계: 환경 스캔 + 상대 선택 (peer 검증 우선)
 
-`/crosstalk:debate`의 1·2단계와 동일한 흐름:
+peer 검증 흐름:
 
 1. `~/.claude/scripts/crosstalk_bridge.sh list-peers` 로 후보 수집 (`unknown`/`shell` 제외).
 2. **후보가 0개**:
@@ -185,7 +185,7 @@ DIFF_LINES=$(wc -l < "$DIFF_PATH" | tr -d ' ')
           예: /crosstalk:review 1440      또는      /crosstalk:review --deep 1440
      ```
      슬래시 커맨드는 다른 슬래시 커맨드를 자동 호출하지 않는다.
-3. 후보가 1개 이상이면 `/crosstalk:debate` 2단계처럼 `AskUserQuestion`으로 상대 선택.
+3. 후보가 1개 이상이면 `AskUserQuestion`으로 상대 선택.
 
 ## 4.5단계: 깊은 모드 — checkout (peer 확정 후, 명시 restore)
 
@@ -333,23 +333,26 @@ ${SHARED_INSTR}
 
 활동 감지(`ACTIVITY_GRACE=30 ACTIVITY_EXTEND_BY=120 ACTIVITY_EXTEND_MAX=3`)로 *살아있는 한* 자동 연장. 위 값은 "최소 대기" 기준.
 
-**v0.2.0 callback 패턴 적용** — `/crosstalk:debate`와 동일한 구조:
+callback 패턴 — analyze와 동일한 구조:
 
 ```bash
 # 메시지 발송 후 곧바로 종료. AI 답변이 끝나면 bridge ping이 사회자 pane을 깨움.
 # 메시지 본문에 ping 안내 한 줄 포함 (preamble 또는 메시지 끝):
 #   "리뷰 마치면: ~/.claude/scripts/crosstalk_bridge.sh ping ${RUN_ID} ${AGENT} 1"
 
-# state 파일에 1단계 컨텍스트 저장 (callback 핸들러가 복원 가능하게)
-{
-  echo "PHASE=review"
-  echo "ROUND=1"
-  for i in "${!AGENTS[@]}"; do
-    agent="${AGENTS[$i]}"; peer="${PEERS[$i]}"
-    echo "PEER_${agent}=${peer}"
-    echo "PREV_LINES_${agent}=$(~/.claude/scripts/crosstalk_bridge.sh lines "$peer")"
-  done
-} > "$RUN_DIR/state.sh"
+# 1단계 컨텍스트를 manifest.json에 머지 (단일 진실).
+# state.sh 패턴 X — manifest만 읽으면 callback 재진입 시 복원 가능.
+PEERS_JSON=$(printf '%s\n' "${AGENTS[@]}" | jq -R '.' \
+  | jq -s --argjson surfaces "$(printf '"%s"\n' "${PEERS[@]}" | jq -s .)" \
+       'to_entries | map({key:.value, value:$surfaces[.key]}) | from_entries')
+
+TMP=$(mktemp)
+jq --arg phase review \
+   --argjson round 1 \
+   --argjson agents "$(printf '%s\n' "${AGENTS[@]}" | jq -R . | jq -s .)" \
+   --argjson peers "$PEERS_JSON" \
+   '. + {mode: $phase, current_round: $round, agents: $agents, peers: $peers}' \
+   "$MANIFEST" > "$TMP" && mv "$TMP" "$MANIFEST"
 
 # 메시지 발송 (1:1이든 다자든 동일)
 for i in "${!AGENTS[@]}"; do
@@ -364,14 +367,20 @@ done
 #### Callback 핸들링 (1단계 → 2단계)
 
 claude pane이 `[crosstalk] codex R1 done — RUN_ID=...` 메시지를 받으면:
-1. `$RUN_DIR/state.sh` source → PHASE=review 확인
+1. `$RUN_DIR/manifest.json` 읽어 컨텍스트 복원:
+   ```bash
+   MANIFEST="/tmp/crosstalk/run-${RUN_ID}/manifest.json"
+   MODE=$(jq -r '.mode' "$MANIFEST")    # "review"
+   AGENTS=($(jq -r '.agents[]' "$MANIFEST"))
+   ROUND=$(jq -r '.current_round' "$MANIFEST")
+   ```
 2. `$RUN_DIR/done/<agent>-r01` 파일들 확인 → 모든 참여자 완료됐는지 검사
 3. 미완료면 → 그냥 종료 (마지막 ping 도착 시 다시 진입)
 4. 모두 완료면 → 각 peer의 응답 파일(`$RUN_DIR/responses/<agent>-r01.md`) 읽어 본문 정리 → **2단계 토론 라운드** 시작
 
 #### Transport 옵션 (file/screen) 사용 시
 
-옵션 흐름은 callback 위에 얹어진다. 자세한 건 debate.md 참조. `MAX_WAIT`은 모드 + agent별:
+옵션 흐름은 callback 위에 얹어진다. `MAX_WAIT`은 모드 + agent별:
 
 | 모드 \ agent | claude/codex 기본 | gemini |
 |---|---|---|
@@ -427,8 +436,8 @@ PR: #${PR_NUM} <title>
 <Claude가 종합한 논점>
 ```
 
-전송 흐름은 `/crosstalk:debate`와 동일 (**v0.2.0 callback 패턴**):
-- 라운드 메시지 발송 → state.sh 갱신(ROUND, PEER_*, PREV_LINES_*) → 슬래시 커맨드 종료
+전송 흐름 (callback 패턴 — analyze와 동일):
+- 라운드 메시지 발송 → manifest의 `current_round` 갱신 → 슬래시 커맨드 종료
 - AI 답변 끝 → `bridge ping` 호출 → 사회자 pane callback
 - 모든 참여자 ping 도착 → 다음 라운드 또는 종합 의견 단계로
 
