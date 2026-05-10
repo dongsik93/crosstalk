@@ -723,7 +723,9 @@ EOF
     fi
 
     # cmux send 로 사회자 pane 입력창에 메시지 박는다 → claude가 새 사용자 입력으로 받음
-    CALLBACK_MSG="[crosstalk] $AGENT R$ROUND done — RUN_ID=$RUN_ID. 답변은 cmux pane 화면에서 캡처해서 정리하고 다음 라운드 진행해."
+    # v0.2.1+: 답변 본문은 응답 파일에 있다. 화면 캡처 X.
+    RESP_PATH="$RUN_DIR/responses/$(printf '%s-r%02d' "$AGENT" "$ROUND").md"
+    CALLBACK_MSG="[crosstalk] $AGENT R$ROUND done — RUN_ID=$RUN_ID. 답변은 $RESP_PATH 에서 읽고 다음 라운드 진행해."
     cmux send --surface "$MOD_SURFACE" "$CALLBACK_MSG" >/dev/null 2>&1
     cmux send-key --surface "$MOD_SURFACE" enter >/dev/null 2>&1
     sleep 0.5

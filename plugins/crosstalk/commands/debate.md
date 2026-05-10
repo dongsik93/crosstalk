@@ -13,10 +13,10 @@ cmux 안에서 분할된 다른 AI CLI(Codex/Gemini)들과 자동으로 토론�
 
 - `--rules <name>` — 일회성 룰 프리셋 명시 (예: `brainstorm`, `debate`, `default`)
 - `--persona <name>` — 일회성 페르소나 프리셋 명시 (예: `senior-junior`, `critic-builder`)
-- `--transport off|file|screen` — 답변 받는 방법. **기본 `off`** (자연스러운 핑-퐁 토론, 답변은 응답 파일).
-  - `off` (기본): 사회자가 화면 텍스트를 직접 읽고 정리. AI에게 transport 지시 안 함 → 답변 instruction following 좋음.
-  - `file`: 답변 본문을 별도 파일에 쓰게 함. 긴 답변 안전. (claude/codex 권장)
-  - `screen`: 답변을 BEGIN/END 블록으로 출력하게 함. (gemini용 — agentic 도구 사고 방지)
+- `--transport off|file|screen` — 답변 받는 방법. **기본 `off`** (모두 응답 파일 기반).
+  - `off` (기본, v0.2.1+): peer가 셸 heredoc로 응답 파일 작성 → ping. 사회자는 *파일에서 읽음* (화면 캡처 X).
+  - `file`: 별도 transport 섹션을 매 턴 추가해 파일 작성 명시. (긴 답변/장기 운영 시)
+  - `screen`: 답변을 BEGIN/END 블록으로 화면에 출력하게 함. (legacy; gemini agentic 도구 사고 방지용)
 - 옵션 없으면 `~/.claude/crosstalk/config.json`의 active 프리셋 사용
 
 룰/페르소나 관리는 `/crosstalk:rules`, `/crosstalk:persona`, `/crosstalk:status` 참고.
@@ -197,46 +197,59 @@ EOF
 ```
 ```
 
-`LANGUAGE=en`이면 영어, `LANGUAGE=ko`이면 한국어. 다음은 fallback 안내용 짧은 버전 (실제 본문은 위 형태로 페르소나/룰을 주입해 보낸다):
+`LANGUAGE` 와 무관하게 — **위 [Crosstalk preamble] 형식 하나만 사용한다**. 룰/페르소나는 active 파일에서 *그대로* 주입.
 
-en:
-```
-[Crosstalk safe mode]
+룰 본문 로딩:
+```bash
+LANG=$(~/.claude/scripts/crosstalk_bridge.sh get-language 2>/dev/null || echo en)
+RULES_FILE="$HOME/.claude/crosstalk/rules/${LANG}/${RULES_NAME}.md"
+PERSONA_FILE="$HOME/.claude/crosstalk/personas/${LANG}/${PERSONA_NAME}.md"
 
-We will debate this topic: <topic>
-
-Rules:
-1. Reply with one paragraph of text opinion only.
-2. Do not modify files, run shell commands, or call external APIs.
-   One exception: each turn's Transport section may allow writing exactly one response file.
-   Do not touch any other file or directory.
-3. If you agree, end with [AGREE]. If not, end with [DISAGREE: reason].
-4. Wait for the first debate turn. Do not answer this preamble.
+RULES_BODY=$(cat "$RULES_FILE")
+PERSONA_BODY=$(cat "$PERSONA_FILE")
 ```
 
-ko:
-```
-[Claude 주관 토론 안전 모드 시작]
-
-지금부터 다음 주제로 토론합니다: <주제>
-
-토론 규칙:
-1. 답변은 한 단락(3-5문장)의 텍스트 의견만.
-2. 파일 수정/셸 명령/외부 API 호출 금지. **텍스트 의견만 출력**.
-   - 도구(WriteFile/Shell/등) 사용 금지. 그냥 화면에 답변 텍스트만 출력하면 된다.
-   - 사회자가 화면을 보고 직접 읽는다 — 별도 마커나 파일 작성 불필요.
-   - (사회자가 `--transport file|screen` 옵션을 켰으면 매 턴 ═══ Transport ═══ 섹션이 별도 지시를 준다.
-      그 경우엔 그 지시만 따르면 된다.)
-3. 토론 자료는 메시지에 직접 첨부됩니다.
-4. 합의 가능하면 답변 끝에 [AGREE], 이견이면 [DISAGREE: 사유].
-5. 첫 메시지를 받으면 토론 시작입니다. 이 프리앰블은 별도 답변 없이 다음 메시지를 기다리세요.
-
-준비됐으면 다음 메시지를 기다려주세요.
-```
+> 룰/페르소나 본문을 *압축/요약하지 마라*. 사용자가 룰 파일을 수정한 의도를 보존해야 한다.
+> active rule 이름은 `~/.claude/crosstalk/config.json`의 `active_rules` 키에서 읽고, 일회성 `--rules <name>` 옵션이 있으면 그걸 우선한다.
 
 전송:
 ```bash
-~/.claude/scripts/crosstalk_bridge.sh send <peer> "<프리앰블>"
+PREAMBLE=$(cat <<EOF
+[Crosstalk preamble]
+
+주제: ${TOPIC}
+
+═══ 페르소나 (${PERSONA_NAME}) ═══
+${PERSONA_BODY}
+
+═══ 토론 규칙 (${RULES_NAME}) ═══
+${RULES_BODY}
+
+═══ 안전 규칙 (변경 불가) ═══
+1. 답변은 자연스러운 텍스트로. 길이/형식은 토론 규칙 섹션을 따른다.
+2. WriteFile/외부 API 같은 도구 사용 금지. 답변 채널은 *셸을 통한 파일 작성 + ping 호출* 두 가지뿐.
+3. 합의 시 [AGREE], 이견 시 [DISAGREE: 사유].
+4. 사회자(Claude)가 매 라운드 짧은 메시지로 차례를 넘긴다 — 그 메시지에만 답해라.
+5. 이 preamble에는 답하지 마라. 다음 메시지를 기다려라.
+
+═══ 답변 절차 (변경 불가) ═══
+너는 \`${AGENT}\` pane이다. RUN_ID는 \`${RUN_ID}\`.
+
+매 라운드 답변은 두 단계:
+
+1단계 — 답변을 파일에 기록:
+  cat > /tmp/crosstalk/run-${RUN_ID}/responses/${AGENT}-r<NN>.md <<'EOF2'
+  <답변 본문>
+  EOF2
+
+2단계 — callback ping:
+  ~/.claude/scripts/crosstalk_bridge.sh ping ${RUN_ID} ${AGENT} <ROUND>
+
+순서 중요 — 1단계가 반드시 먼저. ping이 먼저 가면 사회자가 빈 파일을 읽는다.
+EOF
+)
+
+~/.claude/scripts/crosstalk_bridge.sh send <peer> "$PREAMBLE"
 sleep 3
 ```
 
