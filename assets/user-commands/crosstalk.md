@@ -85,8 +85,6 @@ Crosstalk — readiness
    - `cmux=inside, peers=0` → `/crosstalk:launch` 본문 실행 (peer 자동 띄우기). 완료 후 자동으로 다음 단계 진행.
 3. **준비 완료** → `/crosstalk:analyze` 본문(`commands/analyze.md`)을 실행. `$ARGUMENTS`를 그대로 전달.
 
-> v0.2.5 노트: `/crosstalk:debate`도 여전히 사용 가능하지만, 단일 entrypoint는 analyze로 라우팅한다. v0.3.0에서 debate 명령은 제거되고 analyze가 유일한 흐름이 된다.
-
 ### 3) 안내 메시지 원칙
 
 준비 미완료 안내는 다음 형태:
@@ -110,5 +108,5 @@ AskUserQuestion으로 [계속 / 취소] 선택. 취소 시 종료, 토픽 분실
 ## 주의
 
 - 이 파일은 `/crosstalk:install`이 `~/.claude/commands/`로 복사한 사용자 레벨 슬래시 커맨드.
-- 플러그인 자체 명령(`/crosstalk:analyze`, `/crosstalk:debate` 등)은 그대로 동작 — 고급 사용자가 명시적으로 부르기 위한 흐름.
-- 일반 사용자에게 권장하는 명령은 **이거 하나**. 다른 명령 알 필요 없게 만드는 게 v0.2.5의 목표.
+- 플러그인 자체 명령(`/crosstalk:analyze`, `/crosstalk:review` 등)은 그대로 동작 — 고급 사용자가 명시적으로 부르기 위한 흐름.
+- 일반 사용자에게 권장하는 명령은 **이거 하나**. 다른 명령 알 필요 없게 만드는 게 목표.
