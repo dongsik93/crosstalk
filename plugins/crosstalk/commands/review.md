@@ -367,7 +367,7 @@ claude pane이 `[crosstalk] codex R1 done — RUN_ID=...` 메시지를 받으면
 1. `$RUN_DIR/state.sh` source → PHASE=review 확인
 2. `$RUN_DIR/done/<agent>-r01` 파일들 확인 → 모든 참여자 완료됐는지 검사
 3. 미완료면 → 그냥 종료 (마지막 ping 도착 시 다시 진입)
-4. 모두 완료면 → 각 peer 화면에서 `PREV_LINES_<agent>` 이후 텍스트 capture → 본문 정리 → **2단계 토론 라운드** 시작
+4. 모두 완료면 → 각 peer의 응답 파일(`$RUN_DIR/responses/<agent>-r01.md`) 읽어 본문 정리 → **2단계 토론 라운드** 시작
 
 #### Transport 옵션 (file/screen) 사용 시
 
@@ -435,7 +435,7 @@ PR: #${PR_NUM} <title>
 ping 안내 문구는 메시지에 한 줄로:
 > "답변 끝나면: `~/.claude/scripts/crosstalk_bridge.sh ping ${RUN_ID} ${AGENT} ${ROUND}`"
 
-(Transport 옵션 켰으면 `make-msg-id` → `read-response` 사용. off면 화면 capture.)
+(Transport 옵션 켰으면 `make-msg-id` → `read-response` 사용. off면 응답 파일 `$RUN_DIR/responses/<agent>-r<NN>.md`에서 직접 읽음.)
 
 ## 8단계: 종합
 

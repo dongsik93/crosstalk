@@ -1,7 +1,7 @@
 # Crosstalk
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.2.2-blue)
+![Version](https://img.shields.io/badge/version-0.2.3-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-black)
 
@@ -143,19 +143,24 @@ Deep PR review is available but experimental:
 | `/crosstalk:persona` | Switch, create, edit, or delete personas |
 | `/crosstalk:uninstall` | Remove user-level Crosstalk components |
 
-## How It Works (v0.2.0 — callback ping)
+## How It Works (v0.2.1+ — callback ping + file responses)
 
 1. Claude scans the current cmux workspace for peer AI CLI panes and labels them.
 2. `start-run` records the moderator (Claude) surface in the run manifest.
-3. Claude sends each peer a safe-mode preamble (persona + rules + ping protocol) once, then a short topic message.
+3. Claude sends each peer a preamble (persona + rules + ping protocol + response-file procedure) once, then a short topic message.
 4. **Claude exits the slash command** — its pane is now idle, waiting for input.
-5. Each peer thinks, prints its answer to its own pane, then runs:
+5. Each peer writes its answer to a response file, then signals completion:
    ```bash
+   cat > /tmp/crosstalk/run-<RUN_ID>/responses/<agent>-r<NN>.md <<'EOF'
+   <answer body>
+   EOF
    ~/.claude/scripts/crosstalk_bridge.sh ping <RUN_ID> <agent> <round>
    ```
-6. `bridge ping` reads the manifest, finds the moderator surface, and **sends a callback message into the Claude pane** (e.g. `[crosstalk] codex R3 done — RUN_ID=...`).
-7. Claude wakes up on that input, captures the peer's screen output, and starts the next round (back to step 3).
+6. `bridge ping` reads the manifest, finds the moderator surface, and **sends a callback message into the Claude pane** (e.g. `[crosstalk] codex R3 done — RUN_ID=...`) with the response file path.
+7. Claude wakes up on that input, **reads the response file** (no screen capture), and starts the next round (back to step 3).
 8. When `[AGREE]` or the round limit is reached, Claude produces the final summary.
+
+> Why file + callback? v0.2.0 used screen capture + callback, which raced — peers sometimes pinged before finishing the on-screen answer. v0.2.1+ moves the answer to a file and treats `ping` as a pure completion signal. The response is in one place; reads are deterministic.
 
 > Why callback instead of polling? Earlier versions made Claude `wait-ping` indefinitely, which broke whenever the user interrupted the slash command. Callbacks keep Claude idle between rounds — any peer's `bridge ping` is enough to resume the conversation.
 
@@ -163,16 +168,21 @@ Example run directory:
 
 ```text
 /tmp/crosstalk/run-PpP6hTWx/
-  manifest.json          # includes moderator_surface
-  state.sh               # current round + per-peer prev_lines
+  manifest.json          # includes moderator_surface, mode, agents, current_round
   done/
     codex-r01            # ping markers (also kept for debugging)
     gemini-r01
-  responses/             # only used when --transport file/screen is on
-    codex-r01-a1.md
+  responses/             # always populated — moderator reads from here
+    codex-r01.md
+    gemini-r01.md
+    claude-r01.md
 ```
 
-The default transport (`--transport off`) keeps answers on screen — the moderator captures them directly. `--transport file` or `screen` is opt-in for cases where you need durable response files (long answers, agentic CLIs that mishandle freeform output).
+All three transport modes write to `responses/`:
+
+- `off` (default): peer writes the response file via shell heredoc. Simplest, recommended.
+- `file`: explicit per-turn Transport block instructs the peer to write to a per-attempt file (`<agent>-r<NN>-a<N>.md`). Useful for very long-running runs.
+- `screen` (legacy): peer prints `CROSSTALK_BEGIN`/`CROSSTALK_END` blocks; bridge converts to a response file. Kept for agentic CLIs (e.g. Gemini) that mishandle shell heredocs.
 
 ## Rules and Personas
 
