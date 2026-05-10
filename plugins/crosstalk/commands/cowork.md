@@ -24,6 +24,14 @@ argument-hint: [--no-worktree] [--max-time <duration>] "claude=A 작업, codex=B
 - bridge 설치 완료
 - `--no-worktree`가 아니면 git 레포 안
 
+## 트리거 수신 규약 (v0.6.0+)
+
+긴 분담 본문은 cmux로 직접 보내지 않는다. peer pane이 아래 짧은 트리거를 받으면 파일을 직접 읽고 그 안의 `/goal` 절차를 따른다.
+
+- `[crosstalk] cowork-task <agent> RUN_ID=<RUN_ID>` → `cat /tmp/crosstalk/run-<RUN_ID>/assignments/<agent>.md`
+
+트리거 자체에는 답하지 말고, assignment 파일 본문을 읽은 뒤 작업, 보고 파일 작성, ping까지 수행한다.
+
 ## 1단계: 옵션 파싱
 
 ```bash
@@ -124,11 +132,19 @@ jq --argjson wt "$WT_JSON" '.worktrees = $wt' "$MANIFEST" > "$TMP" && mv "$TMP" 
 `shared` 선택: 모든 peer의 작업 디렉토리 = `$(pwd)`.
 `cancel`: 즉시 종료.
 
-## 6단계: fan-out (각 peer에 작업 + /goal 발동)
+## 6단계: assignment 작성 + 짧은 트리거 전송
 
-각 peer에 다음 메시지를 cmux send:
+각 peer의 분담 본문을 파일로 쓰고, cmux에는 짧은 `cowork-task` 트리거만 보낸다.
 
-```
+```bash
+mkdir -p "$RUN_DIR/assignments"
+
+for entry in "${PEERS[@]}"; do
+  PEER_SURFACE="${entry%|*}"
+  PEER_KIND="${entry#*|}"
+  ASSIGNMENT_FILE="$RUN_DIR/assignments/${PEER_KIND}.md"
+
+  cat > "$ASSIGNMENT_FILE" <<CROSSTALK_ASSIGNMENT
 [Crosstalk cowork — RUN_ID=${RUN_ID}]
 
 너의 작업 분담:
@@ -151,7 +167,7 @@ ${WORKTREE_PATH_OR_PWD}
 3. goal 달성했다고 판단되면 /goal clear (또는 자동 clear되도록 너의 /goal 구현이 처리).
 
 4. 마지막으로 작업 보고를 파일에 기록:
-   cat > /tmp/crosstalk/run-${RUN_ID}/responses/<AGENT>-r01.md <<'EOF'
+   cat > /tmp/crosstalk/run-${RUN_ID}/responses/${PEER_KIND}-r01.md <<'EOF'
    # 작업 보고
    - 분담: ${ASSIGNMENT_FOR_AGENT}
    - 커밋: <git log --oneline 결과>
@@ -160,22 +176,20 @@ ${WORKTREE_PATH_OR_PWD}
    EOF
 
 5. ping 호출:
-   ~/.claude/scripts/crosstalk_bridge.sh ping ${RUN_ID} <AGENT> 1
+   ~/.claude/scripts/crosstalk_bridge.sh ping ${RUN_ID} ${PEER_KIND} 1
 
 ═══ 안전 ═══
 - max ${MAX_TIME} 초 후 사회자가 강제 종료 신호를 보낸다 (cowork-stop).
 - 외부에서 [crosstalk:cowork-stop] 메시지를 받으면 즉시 작업 중단 + 현재까지 보고만 작성하고 ping.
-```
+CROSSTALK_ASSIGNMENT
 
-전송:
-```bash
-for entry in "${PEERS[@]}"; do
-  PEER_SURFACE="${entry%|*}"
-  PEER_KIND="${entry#*|}"
-  ~/.claude/scripts/crosstalk_bridge.sh send "$PEER_SURFACE" "$MSG_FOR_${PEER_KIND}"
+  TRIGGER="[crosstalk] cowork-task ${PEER_KIND} RUN_ID=${RUN_ID}"
+  ~/.claude/scripts/crosstalk_bridge.sh send-via-file "$PEER_SURFACE" "$ASSIGNMENT_FILE" "$TRIGGER"
   sleep 1
 done
 ```
+
+> 큰 분담 본문을 `send`로 직접 보내지 마라. `send-via-file`은 파일 존재만 확인하고 trigger만 전송한다.
 
 **호출자 본인**도 동등하게 작업:
 - worktree 또는 현재 디렉토리로 이동
@@ -266,6 +280,9 @@ worktree 정리 옵션 제시 (AskUserQuestion):
   responses/
     <moderator>-r01.md # 각자 작업 보고
     codex-r01.md
+  assignments/
+    codex.md           # cowork 분담 본문
+    gemini.md
   cowork-summary.md   # 통합 보고
 
 /tmp/crosstalk/worktrees/run-<RUN_ID>/

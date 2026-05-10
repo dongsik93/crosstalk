@@ -2,6 +2,36 @@
 
 Run independent multi-agent analysis from Codex as the moderator.
 
+## Incoming peer triggers
+
+If the user message is a Crosstalk trigger, handle it as a peer and stop after pinging.
+
+For first-round analysis:
+
+```text
+[crosstalk] preamble <agent> RUN_ID=<RUN_ID>
+```
+
+Read and follow:
+
+```bash
+cat /tmp/crosstalk/run-${RUN_ID}/preambles/<agent>.md
+```
+
+For ping-pong rounds:
+
+```text
+[crosstalk] round <NN> <agent> RUN_ID=<RUN_ID>
+```
+
+Read and follow:
+
+```bash
+cat /tmp/crosstalk/run-${RUN_ID}/rounds/r<NN>-<agent>.md
+```
+
+Do not answer the trigger directly. The file body tells you where to write `responses/<agent>-rNN.md` and which `ping` command to call.
+
 ## Parse
 
 Treat the full text after `$crosstalk` as arguments. If it starts with `analyze`, remove that word.
@@ -53,6 +83,7 @@ PEERS=$(printf '%s\n' "$PEERS_RAW" | awk -F'\t' '$2 ~ /^(claude|codex|gemini)$/ 
 RUN_ID=$(CROSSTALK_MODERATOR_KIND=codex ~/.claude/scripts/crosstalk_bridge.sh start-run)
 RUN_DIR="/tmp/crosstalk/run-${RUN_ID}"
 MANIFEST="$RUN_DIR/manifest.json"
+mkdir -p "$RUN_DIR/preambles" "$RUN_DIR/rounds"
 
 MODERATOR_KIND=$(jq -r '.moderator_kind // "codex"' "$MANIFEST")
 AGENTS=("$MODERATOR_KIND")
@@ -91,7 +122,7 @@ Then ping yourself:
 
 ## Fan-out
 
-For every peer, send a message that includes:
+For every peer, write a preamble file that includes:
 
 - `[Crosstalk analyze]`
 - `RUN_ID`
@@ -100,10 +131,19 @@ For every peer, send a message that includes:
 - response path: `/tmp/crosstalk/run-${RUN_ID}/responses/<agent>-r01.md`
 - ping command: `~/.claude/scripts/crosstalk_bridge.sh ping ${RUN_ID} <agent> 1`
 
-Use the bridge:
+Save it to:
+
+```text
+/tmp/crosstalk/run-${RUN_ID}/preambles/<agent>.md
+```
+
+Then send only the short trigger:
 
 ```bash
-~/.claude/scripts/crosstalk_bridge.sh send "$PEER_SURFACE" "$MSG"
+~/.claude/scripts/crosstalk_bridge.sh send-via-file \
+  "$PEER_SURFACE" \
+  "$RUN_DIR/preambles/<agent>.md" \
+  "[crosstalk] preamble <agent> RUN_ID=${RUN_ID}"
 ```
 
 After fan-out, stop and wait for callback. The bridge will send `$crosstalk callback ...` to this Codex pane when peers ping.

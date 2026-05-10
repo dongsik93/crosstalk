@@ -17,6 +17,10 @@ This is a dispatcher. Do not inline every workflow from memory. Read exactly one
 - `resume`: read `resume.md`.
 - `callback RUN_ID=... AGENT=... ROUND=... RESP=...`: read `callback.md`.
 - `status`: read `status.md`.
+- Incoming trigger `[crosstalk] preamble <agent> RUN_ID=...`: read `analyze.md`.
+- Incoming trigger `[crosstalk] round <NN> <agent> RUN_ID=...`: read `analyze.md`.
+- Incoming trigger `[crosstalk] cowork-task <agent> RUN_ID=...`: read `cowork.md`.
+- Incoming trigger `[crosstalk] review-round <NN> <agent> RUN_ID=...`: read `review.md`.
 
 Always use `~/.claude/scripts/crosstalk_bridge.sh` as the transport bridge. Codex does not have Claude-style `$ARGUMENTS`; treat the full user message after `$crosstalk` as the argument string.
 
@@ -27,3 +31,5 @@ CROSSTALK_MODERATOR_KIND=codex ~/.claude/scripts/crosstalk_bridge.sh start-run
 ```
 
 The bridge also detects the current cmux surface and writes `moderator_surface` and `moderator_kind` to the manifest. If cmux or the bridge is missing, follow `readiness.md` and preserve the topic when needed.
+
+When handling an incoming `[crosstalk] ...` trigger as a peer, do not answer the trigger directly. Parse `RUN_ID` and `agent`, read the referenced file under `/tmp/crosstalk/run-<RUN_ID>/`, follow its instructions, write the required response file, then call `~/.claude/scripts/crosstalk_bridge.sh ping`.

@@ -69,13 +69,28 @@ End conditions:
 
 ## Next ping-pong round
 
-Increment `current_round` in the manifest and send each participant a divergence summary. Ask them to write:
+Increment `current_round` in the manifest and write each participant's divergence summary to:
+
+```text
+/tmp/crosstalk/run-${RUN_ID}/rounds/r<NN>-<agent>.md
+```
+
+Then send only the short trigger:
+
+```bash
+~/.claude/scripts/crosstalk_bridge.sh send-via-file \
+  "$PEER_SURFACE" \
+  "$RUN_DIR/rounds/r<NN>-<agent>.md" \
+  "[crosstalk] round <NN> <agent> RUN_ID=${RUN_ID}"
+```
+
+The round file must ask the peer to write:
 
 ```text
 /tmp/crosstalk/run-${RUN_ID}/responses/<agent>-r<NN>.md
 ```
 
-and ping:
+and then ping:
 
 ```bash
 ~/.claude/scripts/crosstalk_bridge.sh ping ${RUN_ID} <agent> ${NEXT_ROUND}

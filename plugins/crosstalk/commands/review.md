@@ -22,6 +22,14 @@ PR diff/branch를 자료로 공유하고, 사회자(Claude)가 turn-taking으로
 - `gh` CLI 인증 완료
 - 현재 디렉토리가 git 레포
 
+## 트리거 수신 규약 (v0.6.0+)
+
+긴 리뷰 라운드 본문은 cmux로 직접 보내지 않는다. peer pane이 아래 짧은 트리거를 받으면 파일을 직접 읽고 그 안의 transport 절차를 따른다.
+
+- `[crosstalk] review-round <NN> <agent> RUN_ID=<RUN_ID>` → `cat /tmp/crosstalk/run-<RUN_ID>/rounds/r<NN>-<agent>.md`
+
+트리거 자체에는 답하지 말고, round 파일 본문을 읽은 뒤 응답 파일 작성 + ping까지 수행한다.
+
 ## 사용 예
 
 ```
@@ -253,9 +261,10 @@ LOG_TMP="/tmp/crosstalk-review-${PR_NUM}-$(date +%Y%m%d-%H%M%S)-$$.md"
 
 RUN_ID=$(~/.claude/scripts/crosstalk_bridge.sh start-run)
 RUN_DIR="/tmp/crosstalk/run-${RUN_ID}"
+mkdir -p "$RUN_DIR/rounds"
 ```
 
-이후 모든 AI 답변(1단계 리뷰, 2단계 토론)은 `$RUN_DIR/responses/<agent>-r<NN>-a<N>.md`에서 읽는다.
+이후 모든 AI 답변(1단계 리뷰, 2단계 토론)은 `$RUN_DIR/responses/<agent>-r<NN>-a<N>.md`에서 읽는다. 모든 리뷰 라운드 요청 본문은 `$RUN_DIR/rounds/r<NN>-<agent>.md`에 저장하고, cmux로는 짧은 `review-round` 트리거만 보낸다.
 
 ## 6단계: 1단계 메시지 — 각 CLI에 리뷰 요청
 
@@ -354,11 +363,14 @@ jq --arg phase review \
    '. + {mode: $phase, current_round: $round, agents: $agents, peers: $peers}' \
    "$MANIFEST" > "$TMP" && mv "$TMP" "$MANIFEST"
 
-# 메시지 발송 (1:1이든 다자든 동일)
+# 메시지 파일 작성 + 짧은 트리거 발송 (1:1이든 다자든 동일)
+mkdir -p "$RUN_DIR/rounds"
 for i in "${!AGENTS[@]}"; do
   agent="${AGENTS[$i]}"; peer="${PEERS[$i]}"
-  MSG=$(substitute_msg "$RAW_MSG" "$agent")  # <RUN_ID>/<AGENT> 치환
-  ~/.claude/scripts/crosstalk_bridge.sh send "$peer" "$MSG"
+  ROUND_FILE="$RUN_DIR/rounds/r01-${agent}.md"
+  substitute_msg "$RAW_MSG" "$agent" > "$ROUND_FILE"  # <RUN_ID>/<AGENT> 치환
+  TRIGGER="[crosstalk] review-round 01 ${agent} RUN_ID=${RUN_ID}"
+  ~/.claude/scripts/crosstalk_bridge.sh send-via-file "$peer" "$ROUND_FILE" "$TRIGGER"
 done
 
 # 사회자 슬래시 커맨드는 여기서 종료. AI 답변 도착하면 bridge ping이 자동으로 사회자를 깨움.
@@ -437,7 +449,9 @@ PR: #${PR_NUM} <title>
 ```
 
 전송 흐름 (callback 패턴 — analyze와 동일):
-- 라운드 메시지 발송 → manifest의 `current_round` 갱신 → 슬래시 커맨드 종료
+- 라운드 메시지를 `$RUN_DIR/rounds/r<NN>-<agent>.md`에 저장
+- 짧은 `[crosstalk] review-round <NN> <agent> RUN_ID=<RUN_ID>` 트리거만 `send-via-file`로 발송
+- manifest의 `current_round` 갱신 → 슬래시 커맨드 종료
 - AI 답변 끝 → `bridge ping` 호출 → 사회자 pane callback
 - 모든 참여자 ping 도착 → 다음 라운드 또는 종합 의견 단계로
 
@@ -445,6 +459,20 @@ ping 안내 문구는 메시지에 한 줄로:
 > "답변 끝나면: `~/.claude/scripts/crosstalk_bridge.sh ping ${RUN_ID} ${AGENT} ${ROUND}`"
 
 (Transport 옵션 켰으면 `make-msg-id` → `read-response` 사용. off면 응답 파일 `$RUN_DIR/responses/<agent>-r<NN>.md`에서 직접 읽음.)
+
+라운드 발송 예:
+
+```bash
+ROUND_PADDED=$(printf '%02d' "$ROUND")
+mkdir -p "$RUN_DIR/rounds"
+for i in "${!AGENTS[@]}"; do
+  agent="${AGENTS[$i]}"; peer="${PEERS[$i]}"
+  ROUND_FILE="$RUN_DIR/rounds/r${ROUND_PADDED}-${agent}.md"
+  render_review_round "$agent" "$ROUND" > "$ROUND_FILE"
+  TRIGGER="[crosstalk] review-round ${ROUND_PADDED} ${agent} RUN_ID=${RUN_ID}"
+  ~/.claude/scripts/crosstalk_bridge.sh send-via-file "$peer" "$ROUND_FILE" "$TRIGGER"
+done
+```
 
 ## 8단계: 종합
 

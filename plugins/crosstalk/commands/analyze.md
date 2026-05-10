@@ -31,6 +31,15 @@ argument-hint: <분석 주제 / 자료 본문>
 - 본인 외 cmux split 안에 다른 AI CLI(Codex/Gemini) 1개 이상 있음 (없으면 `/crosstalk:launch` 안내 후 종료)
 - bridge 스크립트 설치 완료
 
+## 트리거 수신 규약 (v0.6.0+)
+
+긴 본문은 cmux로 직접 보내지 않는다. peer pane이 아래 짧은 트리거를 받으면, 해당 파일을 직접 읽고 그 안의 절차를 따른다.
+
+- `[crosstalk] preamble <agent> RUN_ID=<RUN_ID>` → `cat /tmp/crosstalk/run-<RUN_ID>/preambles/<agent>.md`
+- `[crosstalk] round <NN> <agent> RUN_ID=<RUN_ID>` → `cat /tmp/crosstalk/run-<RUN_ID>/rounds/r<NN>-<agent>.md`
+
+트리거 자체에는 답하지 말고, 파일 본문을 읽은 뒤 응답 파일 작성 + ping까지 수행한다.
+
 ## 0단계: 옵션 파싱 + 룰/페르소나 로드
 
 `$ARGUMENTS`에서 옵션 추출:
@@ -123,11 +132,19 @@ jq --arg mode analyze \
 
 > 별도 `state.sh`는 만들지 않는다. **manifest.json이 단일 진실** — callback 재진입 시 manifest만 읽으면 컨텍스트 복원 가능.
 
-## 3단계: fan-out (모든 참가자에게 동일 메시지 전송)
+## 3단계: fan-out preamble 작성 + 짧은 트리거 전송
 
-각 peer에게 다음 메시지를 *원문 가공 없이* 전송한다. 페르소나/룰 본문이 비어있는 섹션은 통째로 뺀다.
+각 peer용 전체 preamble을 디스크에 저장한다. cmux로는 짧은 트리거만 보낸다.
 
-```
+```bash
+mkdir -p "$RUN_DIR/preambles"
+
+for entry in $PEERS; do
+  PEER_SURFACE="${entry%|*}"
+  PEER_KIND="${entry#*|}"
+  PREAMBLE_FILE="$RUN_DIR/preambles/${PEER_KIND}.md"
+
+  cat > "$PREAMBLE_FILE" <<CROSSTALK_PREAMBLE
 [Crosstalk analyze]
 
 다음 주제에 대한 너의 독립 분석을 듣고 싶다.
@@ -153,25 +170,22 @@ ${TOPIC}
 답변 본문을 다음 셸로 파일에 기록 후 ping을 호출해라.
 WriteFile 같은 도구 사용 X — 그냥 셸 heredoc.
 
-cat > /tmp/crosstalk/run-${RUN_ID}/responses/<AGENT>-r01.md <<'EOF'
+cat > /tmp/crosstalk/run-${RUN_ID}/responses/${PEER_KIND}-r01.md <<'EOF'
 <답변 본문>
 EOF
 
-~/.claude/scripts/crosstalk_bridge.sh ping ${RUN_ID} <AGENT> 1
-```
+~/.claude/scripts/crosstalk_bridge.sh ping ${RUN_ID} ${PEER_KIND} 1
+CROSSTALK_PREAMBLE
 
-> 페르소나/룰 섹션은 1라운드 fan-out에만 한 번 박는다. 핑퐁 라운드(6단계)에는 다시 박지 않는다 — 이미 컨텍스트에 살아있음.
-
-전송:
-```bash
-for peer in $PEERS; do
-  ~/.claude/scripts/crosstalk_bridge.sh send "$peer" "$ANALYZE_MSG_FOR_${peer}"
+  TRIGGER="[crosstalk] preamble ${PEER_KIND} RUN_ID=${RUN_ID}"
+  ~/.claude/scripts/crosstalk_bridge.sh send-via-file "$PEER_SURFACE" "$PREAMBLE_FILE" "$TRIGGER"
   sleep 1
 done
 ```
 
-> 메시지에서 `<AGENT>`는 각 peer 이름으로 치환. RUN_ID는 실제 값으로 치환.
+> 페르소나/룰 섹션은 1라운드 fan-out에만 한 번 박는다. 핑퐁 라운드(6단계)에는 다시 박지 않는다 — 이미 컨텍스트에 살아있음.
 > 사용자 원문 `$TOPIC`는 *압축/요약/재해석 없이* 그대로 박는다.
+> 트리거는 40~80자 수준이어야 한다. 큰 본문을 `send`로 직접 보내지 마라.
 
 **호출자 본인도 동일 자료로 분석 시작** (다른 peer 답변 보지 않은 상태에서):
 - 위 답변 형식대로 자기 분석을 작성
@@ -227,9 +241,19 @@ callback 모델 — 한 라운드만 발송하고 슬래시 커맨드 종료. pi
 
 ## 6단계: 핑퐁 라운드 (조건부)
 
-대치 발생 시. 모든 참가자에게 *현재 분기 상황*을 알리고 입장 갱신을 요청.
+대치 발생 시. 모든 참가자에게 보낼 *현재 분기 상황*과 입장 갱신 요청을 파일로 저장하고 짧은 트리거만 보낸다.
 
-```
+```bash
+NEXT_ROUND=$((CURRENT_ROUND + 1))
+ROUND_PADDED=$(printf '%02d' "$NEXT_ROUND")
+mkdir -p "$RUN_DIR/rounds"
+
+for entry in $PEERS; do
+  PEER_SURFACE="${entry%|*}"
+  PEER_KIND="${entry#*|}"
+  ROUND_FILE="$RUN_DIR/rounds/r${ROUND_PADDED}-${PEER_KIND}.md"
+
+  cat > "$ROUND_FILE" <<CROSSTALK_ROUND
 [Crosstalk analyze - Round ${NEXT_ROUND}]
 
 현재 분기 상황:
@@ -247,18 +271,23 @@ callback 모델 — 한 라운드만 발송하고 슬래시 커맨드 종료. pi
   (d) 더 이상 양보 어려움 → [RESPECT_DISAGREE: <사유>]
 
 답변 → 파일 → ping (포맷 동일):
-cat > /tmp/crosstalk/run-${RUN_ID}/responses/<AGENT>-r${ROUND_PADDED}.md <<'EOF'
+cat > /tmp/crosstalk/run-${RUN_ID}/responses/${PEER_KIND}-r${ROUND_PADDED}.md <<'EOF'
 <답변>
 EOF
-~/.claude/scripts/crosstalk_bridge.sh ping ${RUN_ID} <AGENT> ${NEXT_ROUND}
+~/.claude/scripts/crosstalk_bridge.sh ping ${RUN_ID} ${PEER_KIND} ${NEXT_ROUND}
+CROSSTALK_ROUND
+
+  TRIGGER="[crosstalk] round ${ROUND_PADDED} ${PEER_KIND} RUN_ID=${RUN_ID}"
+  ~/.claude/scripts/crosstalk_bridge.sh send-via-file "$PEER_SURFACE" "$ROUND_FILE" "$TRIGGER"
+  sleep 1
+done
 ```
 
 > 호출자가 정리하는 "핵심 이견"은 *각 답변에서 발췌한 표현 기반*이어야 한다 — 새 해석 추가 X.
 
-각 참가자에게 fan-out 후, **manifest의 current_round를 증가**시키고 슬래시 커맨드 종료:
+각 참가자에게 trigger 전송 후, **manifest의 current_round를 증가**시키고 슬래시 커맨드 종료:
 
 ```bash
-NEXT_ROUND=$((CURRENT_ROUND + 1))
 TMP=$(mktemp)
 jq --argjson r "$NEXT_ROUND" '.current_round = $r' "$MANIFEST" > "$TMP" && mv "$TMP" "$MANIFEST"
 ```
@@ -378,6 +407,12 @@ echo "📁 last: $LAST_DIR  (또는 $RUN_DIR)"
     codex-r01.md
     gemini-r01.md
     ...
+  preambles/
+    codex.md          # 1라운드 fan-out 본문
+    gemini.md
+  rounds/
+    r02-codex.md      # 핑퐁 라운드 본문
+    r02-gemini.md
   analysis.md         # 최종 산출물
 ```
 

@@ -24,7 +24,7 @@ argument-hint: [--presets-only [--language en|ko]]
 - ✅ Claude Code 측 컴포넌트 자동 설치
 - ✅ Codex caller용 `$crosstalk` skill 설치
 - ✅ AI CLI npm 자동 설치 (claude/codex/gemini)
-- ⚠️ Codex caller는 v0.5.0 experimental
+- ⚠️ Codex caller는 experimental
   - `$crosstalk` skill + bridge callback으로 동작
   - 실제 callback 자동 진행은 cmux/Codex 버전 조합에서 확인 필요
   - Codex CLI가 아직 없어도 skill 파일 설치 자체는 성공해야 함

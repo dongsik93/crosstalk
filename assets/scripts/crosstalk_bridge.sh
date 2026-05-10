@@ -12,6 +12,9 @@
 #   crosstalk_bridge.sh label <surface> <kind>     → cmux 탭에 ct-<kind> 라벨 박기 (kind: claude/codex/gemini/shell)
 #   crosstalk_bridge.sh get-label <surface>        → 라벨에서 ct-* 부분 추출 (없으면 빈 줄)
 #   crosstalk_bridge.sh send <surface> <text>      → 상대에게 텍스트 + Enter 전송 (Gemini/Codex는 Enter 2회)
+#   crosstalk_bridge.sh send-via-file <surface> <body-file> <trigger-msg>
+#                                                  → body-file 존재 검증 후 짧은 trigger-msg만 send.
+#                                                  긴 본문은 caller가 이미 디스크에 저장해둔 것을 peer가 cat.
 #   crosstalk_bridge.sh wait <surface> <since-line>  → [LEGACY/DEPRECATED v0.1.4]
 #                                                  화면 캡처 기반 대기. 새 흐름은 wait-turn 사용.
 #                                                  외부 호환을 위해 남김. v0.2.0에서 제거 예정.
@@ -283,6 +286,18 @@ case "$CMD" in
         fi
         ;;
     esac
+    ;;
+
+  send-via-file)
+    SURFACE="${1:?surface required}"
+    BODY_FILE="${2:?body-file required}"
+    TRIGGER_MSG="${3:?trigger-msg required}"
+    if [ ! -f "$BODY_FILE" ]; then
+      echo "ERROR: body file not found: $BODY_FILE" >&2
+      echo "Next: write the full Crosstalk message to disk before calling send-via-file." >&2
+      exit 1
+    fi
+    "$0" send "$SURFACE" "$TRIGGER_MSG"
     ;;
 
   capture)
@@ -717,7 +732,7 @@ case "$CMD" in
     }
     BASENAME=$(basename "$RUN_DIR")     # run-XXXXXXXX
     RID="${BASENAME#run-}"              # XXXXXXXX
-    mkdir -p "$RUN_DIR/responses" "$RUN_DIR/done"
+    mkdir -p "$RUN_DIR/responses" "$RUN_DIR/done" "$RUN_DIR/preambles" "$RUN_DIR/rounds" "$RUN_DIR/assignments"
 
     # 사회자(=호출자) surface/kind 식별. ping callback이 이 pane에 메시지 보낸다.
     MOD_SURFACE=$(self_surface 2>/dev/null || echo "")
@@ -729,7 +744,7 @@ case "$CMD" in
       claude|codex) ;;
       gemini)
         rm -rf "$RUN_DIR"
-        echo "ERROR: Gemini caller mode is not supported in Crosstalk v0.5.0" >&2
+        echo "ERROR: Gemini caller mode is not supported in Crosstalk v0.6.0" >&2
         echo "Next: start the run from Claude (/crosstalk) or Codex (\$crosstalk)." >&2
         exit 1
         ;;
@@ -1141,7 +1156,7 @@ EOF
     ;;
 
   *)
-    echo "Usage: $0 {peer|detect|list-peers|list-all|label|get-label|send|wait|capture|lines|prompt-count|save|stop|get-language|ensure-presets|wait-ready|start-run|make-msg-id|wait-turn|ping|wait-ping|read-response} [args...]" >&2
+    echo "Usage: $0 {peer|detect|list-peers|list-all|label|get-label|send|send-via-file|wait|capture|lines|prompt-count|save|stop|get-language|ensure-presets|wait-ready|start-run|make-msg-id|wait-turn|ping|wait-ping|read-response} [args...]" >&2
     exit 2
     ;;
 esac

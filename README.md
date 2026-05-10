@@ -1,7 +1,7 @@
 # Crosstalk
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.5.0-blue)
+![Version](https://img.shields.io/badge/version-0.6.0-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-black)
 
@@ -19,10 +19,10 @@ Unlike headless multi-agent tools, Crosstalk keeps the work visible. You watch e
 
 - **Use your existing CLI subscriptions**: no separate API keys or per-token integration required.
 - **Visible multi-agent workflow**: Claude, Codex, and Gemini run in neighboring cmux panes.
-- **Codex caller support** *(v0.5.0+ experimental)*: Codex can start runs with `$crosstalk`, and bridge callbacks re-enter through `$crosstalk callback ...`.
+- **Codex caller support** *(experimental)*: Codex can start runs with `$crosstalk`, and bridge callbacks re-enter through `$crosstalk callback ...`.
 - **Independent analysis, no knowledge pollution**: the user's raw input is fan-out unchanged — no moderator summary, no agenda setting.
 - **Deterministic verdict extraction**: `[AGREE]` / `[RESPECT_DISAGREE]` markers are parsed by the bridge, not interpreted by an LLM.
-- **File-based response transport**: responses are written to `/tmp/crosstalk/run-*/responses/*.md`, avoiding terminal scrollback loss for long answers.
+- **File-based messaging** *(v0.6.0+)*: large preambles, ping-pong rounds, cowork assignments, review rounds, and responses all live under `/tmp/crosstalk/run-*`; cmux only sends short triggers.
 - **Topic preservation across cmux entry**: call `/crosstalk` outside cmux, then `/crosstalk:resume` inside — your topic is kept.
 - **PR review mode** *(advanced)*: moderator-driven review using `gh pr diff`.
 - **Co-work mode** *(v0.4.0+)*: each peer runs its own `/goal` to deliver part of a task in parallel, isolated in git worktrees. Crosstalk fans out the assignment, enforces a time cap, and collects results.
@@ -142,7 +142,7 @@ Deep PR review is experimental — `/crosstalk:review --deep 1440` checks out th
 | `/crosstalk:status` | Show active rules, personas, and pane status. |
 | `/crosstalk:install` / `/crosstalk:uninstall` | Install or remove Crosstalk components. |
 
-### Codex caller (v0.5.0+ experimental)
+### Codex caller (experimental)
 
 Run these from a Codex pane after `/crosstalk:install` has installed `~/.codex/skills/crosstalk/`.
 
@@ -169,25 +169,26 @@ These exist for manual control or recovery — you typically don't need them.
 | `/crosstalk:review [PR]` | Moderator-driven PR review using `gh pr diff`. |
 | `/crosstalk:review --deep [PR]` | Experimental deep PR review with checkout/stash/restore. |
 
-## How It Works (v0.5.0)
+## How It Works (v0.6.0)
 
-1. **Fan-out, raw**: Crosstalk scans the cmux workspace for peer AI panes and sends each peer the user's topic *unchanged*. No moderator summary, no agenda. The caller itself also analyzes in parallel as one more participant.
-2. **Independent answers in parallel**: each peer writes its analysis to a response file:
+1. **Fan-out, raw, via files**: Crosstalk scans the cmux workspace for peer AI panes, writes each peer's full prompt to disk, then sends only a short trigger through cmux. No large prompt is typed into another pane.
+2. **Peers read their message file**: analyze preambles live in `preambles/<agent>.md`, ping-pong and review rounds live in `rounds/r<NN>-<agent>.md`, and cowork tasks live in `assignments/<agent>.md`.
+3. **Independent answers in parallel**: each peer writes its answer to a response file:
    ```bash
    cat > /tmp/crosstalk/run-<RUN_ID>/responses/<agent>-r<NN>.md <<'EOF'
    <conclusion + reasoning + confidence + verdict marker>
    EOF
    ~/.claude/scripts/crosstalk_bridge.sh ping <RUN_ID> <agent> <round>
    ```
-3. **Callback wakes the moderator**: `bridge ping` reads the manifest, finds the caller pane, and sends a callback message with the response file path. Claude callers receive the legacy `[crosstalk] ...` message; Codex callers receive `$crosstalk callback RUN_ID=... AGENT=... ROUND=... RESP=...`. The caller exits between rounds — no polling, no idle bash process.
-4. **Deterministic verdict extraction**: when all peers ping, the bridge runs `extract-verdict` on each response file to parse `[AGREE]` / `[RESPECT_DISAGREE: reason]` / `confidence: high|medium|low` markers. The LLM does not interpret consensus.
-5. **Compare or ping-pong**:
+4. **Callback wakes the moderator**: `bridge ping` reads the manifest, finds the caller pane, and sends a short callback message with the response file path. Claude callers receive the legacy `[crosstalk] ...` message; Codex callers receive `$crosstalk callback RUN_ID=... AGENT=... ROUND=... RESP=...`. The caller exits between rounds — no polling, no idle bash process.
+5. **Deterministic verdict extraction**: when all peers ping, the bridge runs `extract-verdict` on each response file to parse `[AGREE]` / `[RESPECT_DISAGREE: reason]` / `confidence: high|medium|low` markers. The LLM does not interpret consensus.
+6. **Compare or ping-pong**:
    - All `verdict=AGREE` → consensus. Print combined conclusion.
    - One or more `RESPECT_DISAGREE` → respectful divergence. Print each verdict with its reason.
-   - Otherwise → one more round. Each peer sees the current divergence summary and updates: keep, change, agree, or respect-disagree.
-6. **Hard cap at 10 rounds** to prevent runaway loops.
+   - Otherwise → one more file-backed round. Each peer sees the current divergence summary and updates: keep, change, agree, or respect-disagree.
+7. **Hard cap at 10 rounds** to prevent runaway loops.
 
-> Why file + callback? Earlier versions screen-captured peer panes, which raced — a peer sometimes pinged before finishing the on-screen answer. v0.2.1+ moves the answer to a file and treats `ping` as a pure completion signal.
+> Why file + trigger? Earlier versions sent full prompts through cmux input simulation. Large prompts could take 30-60 seconds to paste and make the caller command time out, risking duplicate fan-out. v0.6.0 writes every large message to disk and sends only a short deterministic trigger.
 >
 > Why deterministic verdict extraction? Earlier versions had the moderator LLM decide "this looks like consensus." v0.3.0 makes verdict a parsed marker. The moderator only summarizes; it cannot silently end a run.
 
@@ -203,13 +204,25 @@ Example run directory:
     codex-r01.md
     gemini-r01.md
     claude-r01.md
+  preambles/             # analyze round 1 prompts
+    codex.md
+    gemini.md
+  rounds/                # analyze ping-pong and review round prompts
+    r02-codex.md
+    r02-gemini.md
+  assignments/           # cowork task prompts
+    codex.md
+    gemini.md
 ```
 
-All three transport modes write to `responses/`:
+File-backed channels:
 
-- `off` (default): peer writes the response file via shell heredoc. Simplest, recommended.
-- `file`: explicit per-turn Transport block instructs the peer to write to a per-attempt file (`<agent>-r<NN>-a<N>.md`). Useful for very long-running runs.
-- `screen` (legacy): peer prints `CROSSTALK_BEGIN`/`CROSSTALK_END` blocks; bridge converts to a response file. Kept for agentic CLIs (e.g. Gemini) that mishandle shell heredocs.
+- `preambles/<agent>.md`: analyze round 1 prompt.
+- `rounds/r<NN>-<agent>.md`: analyze ping-pong and review prompts.
+- `assignments/<agent>.md`: cowork task prompt.
+- `responses/<agent>-r<NN>.md`: peer answers and cowork reports.
+
+cmux receives only short triggers such as `[crosstalk] preamble codex RUN_ID=...`, `[crosstalk] round 02 codex RUN_ID=...`, `[crosstalk] cowork-task codex RUN_ID=...`, and callback messages.
 
 ## Co-work Mode (v0.4.0+)
 
@@ -222,7 +235,7 @@ All three transport modes write to `responses/`:
 Flow:
 
 1. **Crosstalk parses the assignment**, asks once whether to isolate work in git worktrees (recommended), and falls back to `--no-worktree` for shared-tree work.
-2. **Fan-out**: each peer is told its slice + `/goal "<goal>"` + write a final report to `responses/<agent>-r01.md` + `bridge ping` when done.
+2. **Fan-out**: each peer's slice + `/goal "<goal>"` + final report instructions are written to `assignments/<agent>.md`; cmux receives only `[crosstalk] cowork-task <agent> RUN_ID=...`.
 3. **Each peer runs its own `/goal`**. The peer's CLI keeps stop blocked until it judges the goal met — Crosstalk doesn't second-guess that judgment.
 4. **Time cap**: default 1 hour. On timeout (or on `/crosstalk:cowork-stop`), bridge sends `/goal clear` + a termination notice to every peer via cmux.
 5. **Result aggregation**: the moderator reads each peer's report + their git log inside the worktree and writes `cowork-summary.md`. Worktree handling is up to the user — `keep` (default), `merge`, or `drop`.
@@ -233,6 +246,9 @@ Flow:
   responses/
     claude-r01.md          # each peer's work report
     codex-r01.md
+  assignments/
+    claude.md              # each peer's work prompt
+    codex.md
   cowork-summary.md        # moderator's rolled-up summary
 
 /tmp/crosstalk/worktrees/run-<RUN_ID>/

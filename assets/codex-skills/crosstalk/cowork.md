@@ -2,6 +2,22 @@
 
 Run Crosstalk co-work mode from Codex as the moderator.
 
+## Incoming peer trigger
+
+If the user message is:
+
+```text
+[crosstalk] cowork-task <agent> RUN_ID=<RUN_ID>
+```
+
+handle it as a peer. Read and follow:
+
+```bash
+cat /tmp/crosstalk/run-${RUN_ID}/assignments/<agent>.md
+```
+
+Do not answer the trigger directly. The assignment file tells you the work directory, `/goal` command, report path, and ping command.
+
 ## Parse
 
 Remove the leading `cowork` word. Supported options:
@@ -26,6 +42,7 @@ PEERS=$(printf '%s\n' "$PEERS_RAW" | awk -F'\t' '$2 ~ /^(claude|codex|gemini)$/ 
 RUN_ID=$(CROSSTALK_MODERATOR_KIND=codex ~/.claude/scripts/crosstalk_bridge.sh start-run)
 RUN_DIR="/tmp/crosstalk/run-${RUN_ID}"
 MANIFEST="$RUN_DIR/manifest.json"
+mkdir -p "$RUN_DIR/assignments"
 
 MODERATOR_KIND=$(jq -r '.moderator_kind // "codex"' "$MANIFEST")
 AGENTS=("$MODERATOR_KIND")
@@ -50,7 +67,13 @@ For shared mode, use the current working directory for every agent.
 
 ## Fan-out
 
-For each peer, send:
+For each peer, write the full assignment to:
+
+```text
+/tmp/crosstalk/run-${RUN_ID}/assignments/<agent>.md
+```
+
+The assignment file includes:
 
 - `[Crosstalk cowork]`
 - `RUN_ID`
@@ -59,6 +82,15 @@ For each peer, send:
 - instruction to run its own `/goal "<GOAL>"`
 - instruction to write `/tmp/crosstalk/run-${RUN_ID}/responses/<agent>-r01.md`
 - ping command
+
+Then send only the short trigger:
+
+```bash
+~/.claude/scripts/crosstalk_bridge.sh send-via-file \
+  "$PEER_SURFACE" \
+  "$RUN_DIR/assignments/<agent>.md" \
+  "[crosstalk] cowork-task <agent> RUN_ID=${RUN_ID}"
+```
 
 Codex also participates. Start or perform Codex's own assignment after fan-out, then write `responses/codex-r01.md` and ping `codex 1`.
 
