@@ -1,7 +1,7 @@
 # Crosstalk
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.2.5-blue)
+![Version](https://img.shields.io/badge/version-0.2.6-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-black)
 
@@ -93,7 +93,7 @@ Just type your question:
 /crosstalk Should this Android project use Compose or XML?
 ```
 
-That's it. If anything is missing (cmux not running, no peer CLIs in the workspace), `/crosstalk` will tell you the next single action and preserve your topic — you don't need to learn `:install`, `:launch`, or `:setup` separately.
+That's it. If anything is missing (cmux not running, no peer CLIs in the workspace), `/crosstalk` will tell you the next single action and **preserve your topic** — you don't need to retype it. From cmux, run `/crosstalk:resume` to pick up where you left off (v0.2.6+).
 
 To check status without starting a run:
 
@@ -129,6 +129,7 @@ Deep PR review is experimental — `/crosstalk:review --deep 1440` checks out th
 | `/crosstalk:analyze --rules <name> <topic>` | Apply a rules preset for one analyze run. |
 | `/crosstalk:analyze --persona <name> <topic>` | Apply a persona preset for one analyze run. |
 | `/crosstalk:debate <topic>` | Explicit debate (moderator-driven turn-taking). Will be removed in v0.3.0 — analyze covers most cases. |
+| `/crosstalk:resume` | Resume a topic that was preserved when `/crosstalk` was called outside cmux (v0.2.6+). |
 | `/crosstalk:review [PR]` | Fast PR review using `gh pr diff`. |
 | `/crosstalk:review --deep [PR]` | Experimental deep PR review with checkout/stash/restore. |
 
