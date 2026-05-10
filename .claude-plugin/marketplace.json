@@ -5,13 +5,13 @@
   },
   "metadata": {
     "description": "Independent multi-agent analysis via cmux split panes — fan out one question to Claude, Codex, and Gemini and compare their verdicts.",
-    "version": "0.3.0"
+    "version": "0.3.1"
   },
   "plugins": [
     {
       "name": "crosstalk",
       "description": "cmux-based multi-agent independent analysis (analyze / resume / review / setup / launch / install / rules / persona / status).",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "author": {
         "name": "dongsik93"
       },

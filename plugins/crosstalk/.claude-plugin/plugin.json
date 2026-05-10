@@ -1,6 +1,6 @@
 {
   "name": "crosstalk",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Independent multi-agent analysis slash commands powered by cmux split panes. Claude, Codex, and Gemini analyze the same raw input and Crosstalk extracts deterministic verdicts.",
   "author": {
     "name": "dongsik93"
