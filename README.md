@@ -1,7 +1,7 @@
 # Crosstalk
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.2.1-blue)
+![Version](https://img.shields.io/badge/version-0.2.2-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-black)
 
@@ -127,6 +127,7 @@ Deep PR review is available but experimental:
 | `/crosstalk:debate <topic>` | Standard debate with one or more peer CLIs |
 | `/crosstalk:debate --rules <name> <topic>` | Use a rules preset once |
 | `/crosstalk:debate --persona <name> <topic>` | Use a persona preset once |
+| `/crosstalk:analyze <topic>` | Independent analysis without a moderator. Each peer analyzes the same raw input; ping-pong only on disagreement, ends in consensus or respectful divergence (v0.2.2+). |
 | `/crosstalk:review [PR]` | Fast PR review using `gh pr diff` |
 | `/crosstalk:review --deep [PR]` | Experimental deep PR review with checkout/stash/restore |
 
