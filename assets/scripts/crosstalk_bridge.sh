@@ -165,6 +165,7 @@ case "$CMD" in
     done
     if [ -z "$PEER" ]; then
       echo "ERROR: peer surface not found (split이 안 되어있거나 cmux 안에서 실행되지 않음)" >&2
+      echo "Next: cmux 워크스페이스 안에서 '/crosstalk:launch' 실행하거나, '/crosstalk <주제>'로 자동 셋업." >&2
       exit 1
     fi
     echo "$PEER"
@@ -465,6 +466,7 @@ case "$CMD" in
     mkdir -p "$CROSSTALK_ROOT"
     RUN_DIR=$(mktemp -d "$CROSSTALK_ROOT/run-XXXXXXXX") || {
       echo "ERROR: failed to allocate run dir under $CROSSTALK_ROOT" >&2
+      echo "Next: '$CROSSTALK_ROOT' 디렉토리 권한/디스크 확인. 또는 CROSSTALK_ROOT 환경변수로 다른 위치 지정." >&2
       exit 1
     }
     BASENAME=$(basename "$RUN_DIR")     # run-XXXXXXXX
@@ -555,6 +557,7 @@ EOF
     RUN_DIR="$CROSSTALK_ROOT/run-$RUN_ID"
     if [ ! -d "$RUN_DIR/responses" ]; then
       echo "ERROR: run dir not found: $RUN_DIR (call start-run first)" >&2
+      echo "Next: 사회자 측에서 'crosstalk_bridge.sh start-run' 먼저 호출했는지 확인. RUN_ID 인자가 잘못 전달됐을 수 있음." >&2
       exit 1
     fi
 
@@ -563,6 +566,7 @@ EOF
     RESP_BASENAME=$(echo "$MSG_ID" | sed -E "s/^run-${RUN_ID}-r([0-9]+)-([a-z]+)-a([0-9]+)$/\\2-r\\1-a\\3.md/")
     if [ "$RESP_BASENAME" = "$MSG_ID" ]; then
       echo "ERROR: malformed msg-id '$MSG_ID' (expected run-<rid>-r<NN>-<agent>-a<N>)" >&2
+      echo "Next: 'crosstalk_bridge.sh make-msg-id <RUN_ID> <round> <agent> <attempt>' 로 msg-id 생성해서 사용." >&2
       exit 1
     fi
 
@@ -713,6 +717,7 @@ EOF
     MANIFEST="$RUN_DIR/manifest.json"
     if [ ! -f "$MANIFEST" ]; then
       echo "ERROR: run dir not found: $RUN_DIR (moderator must call start-run first)" >&2
+      echo "Next: 사회자(slash command 호출자)가 start-run 먼저 호출했는지 확인. 또는 RUN_ID 인자가 잘못 전달됐는지 확인." >&2
       exit 1
     fi
 
@@ -724,6 +729,7 @@ EOF
     MOD_SURFACE=$(jq -r '.moderator_surface // ""' "$MANIFEST" 2>/dev/null || echo "")
     if [ -z "$MOD_SURFACE" ] || [ "$MOD_SURFACE" = "null" ]; then
       echo "WARN: moderator_surface not in manifest. ping marker only." >&2
+      echo "Next: 사회자가 cmux 안에서 start-run을 호출했는지 확인 (cmux 외부에서는 surface가 식별되지 않음). 마커는 정상 기록됨." >&2
       echo "OK ping=$AGENT-r$(printf '%02d' "$ROUND") (marker-only)"
       exit 0
     fi
