@@ -314,15 +314,24 @@ jq --argjson r "$NEXT_ROUND" '.current_round = $r' "$MANIFEST" > "$TMP" && mv "$
 (추가 라운드를 원하면 같은 주제로 다시 호출)
 ```
 
-## 9단계: 보관
+## 9단계: 보관 + 마지막 run 등록 (v0.2.6+)
 
 ```bash
 ANALYSIS_FILE="$RUN_DIR/analysis.md"
 cp <위 산출물> "$ANALYSIS_FILE"
 echo "💾 보관: $ANALYSIS_FILE"
+
+# 영구 위치(~/.crosstalk/last)로 사본 등록 — /tmp 정리 정책 영향 없음
+LAST_DIR=$(~/.claude/scripts/crosstalk_bridge.sh register-last "$RUN_ID")
+
+# 사용자 화면에 1줄 요약 + 경로 출력
+SUMMARY=$(grep -m1 -E '^[^#[:space:]]' "$ANALYSIS_FILE" 2>/dev/null | head -c 200)
+echo ""
+echo "✅ ${SUMMARY}"
+echo "📁 last: $LAST_DIR  (또는 $RUN_DIR)"
 ```
 
-응답 파일은 `$RUN_DIR/responses/`에 그대로 보존.
+응답 파일은 `$RUN_DIR/responses/`와 `$LAST_DIR/responses/`에 모두 보존.
 
 ---
 

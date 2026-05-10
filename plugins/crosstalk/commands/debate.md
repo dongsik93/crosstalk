@@ -535,6 +535,16 @@ cmux 명령 결과/raw 출력은 노출 금지. 대화 내용만.
 
 종합도 `$LOG_TMP`에 append.
 
+**v0.2.6+: 마지막 run 등록**
+
+```bash
+LAST_DIR=$(~/.claude/scripts/crosstalk_bridge.sh register-last "$RUN_ID")
+SUMMARY=$(grep -m1 -E '^🎯 결론' "$LOG_TMP" 2>/dev/null | head -c 200)
+echo ""
+echo "✅ ${SUMMARY:-종합 완료}"
+echo "📁 last: $LAST_DIR  (또는 $RUN_DIR)"
+```
+
 ## 9단계: 로그 + transport run 보관/폐기 질문
 
 `AskUserQuestion`으로 언어별 질문:
