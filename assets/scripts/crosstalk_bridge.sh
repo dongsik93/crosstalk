@@ -519,6 +519,98 @@ case "$CMD" in
     printf 'verdict=%s\nreason=%s\nconfidence=%s\n' "$VERDICT" "$REASON" "$CONFIDENCE"
     ;;
 
+  start-worktree)
+    # 'crosstalk start-worktree <RUN_ID> <AGENT>'
+    # 현재 git 레포 안에서 git worktree add. 새 브랜치 cowork/<RUN_ID>-<AGENT>.
+    # 출력: 생성된 worktree 절대 경로.
+    RUN_ID="${1:?run-id required}"
+    AGENT="${2:?agent required}"
+    validate_run_id "$RUN_ID" || exit 1
+    validate_agent "$AGENT" || exit 1
+
+    if ! git rev-parse --git-dir >/dev/null 2>&1; then
+      echo "ERROR: not in a git repository" >&2
+      echo "Next: git init 또는 git 레포 안에서 호출. 비-git 환경은 --no-worktree 옵션 사용." >&2
+      exit 1
+    fi
+
+    WORKTREES_ROOT="${CROSSTALK_ROOT:-/tmp/crosstalk}/worktrees/run-$RUN_ID"
+    mkdir -p "$WORKTREES_ROOT"
+    WT_DIR="$WORKTREES_ROOT/$AGENT"
+    BRANCH="cowork/${RUN_ID}-${AGENT}"
+
+    if [ -d "$WT_DIR" ]; then
+      echo "$WT_DIR"
+      exit 0
+    fi
+
+    if ! git worktree add -b "$BRANCH" "$WT_DIR" >/dev/null 2>&1; then
+      echo "ERROR: failed to create worktree at $WT_DIR" >&2
+      echo "Next: 브랜치 이름 충돌 확인 ('git branch -D $BRANCH'), 또는 worktrees 디렉토리 권한 확인." >&2
+      exit 1
+    fi
+    echo "$WT_DIR"
+    ;;
+
+  cleanup-worktrees)
+    # 'crosstalk cleanup-worktrees <RUN_ID>'
+    # run에 속한 모든 worktree 정리. 브랜치는 보존(사용자가 머지/검토할 수 있게).
+    RUN_ID="${1:?run-id required}"
+    validate_run_id "$RUN_ID" || exit 1
+
+    WORKTREES_ROOT="${CROSSTALK_ROOT:-/tmp/crosstalk}/worktrees/run-$RUN_ID"
+    if [ ! -d "$WORKTREES_ROOT" ]; then
+      echo "no worktrees for run-$RUN_ID"
+      exit 0
+    fi
+
+    REMOVED=0
+    if git rev-parse --git-dir >/dev/null 2>&1; then
+      for WT in "$WORKTREES_ROOT"/*; do
+        [ -d "$WT" ] || continue
+        if git worktree remove --force "$WT" >/dev/null 2>&1; then
+          echo "removed worktree: $WT"
+          REMOVED=$((REMOVED + 1))
+        else
+          echo "WARN: could not remove worktree (may be already gone): $WT" >&2
+        fi
+      done
+    fi
+
+    rmdir "$WORKTREES_ROOT" 2>/dev/null || true
+    echo "summary: removed=$REMOVED (브랜치는 보존 — 'git branch | grep cowork/$RUN_ID' 로 확인)"
+    ;;
+
+  notify-stop)
+    # 'crosstalk notify-stop <RUN_ID>'
+    # cowork 진행 중인 모든 peer에게 /goal clear + 종료 신호 cmux send.
+    # peer가 /goal 훅에 갇혀있어도 외부에서 깰 수 있음.
+    RUN_ID="${1:?run-id required}"
+    validate_run_id "$RUN_ID" || exit 1
+
+    CROSSTALK_ROOT="${CROSSTALK_ROOT:-/tmp/crosstalk}"
+    MANIFEST="$CROSSTALK_ROOT/run-$RUN_ID/manifest.json"
+    if [ ! -f "$MANIFEST" ]; then
+      echo "ERROR: run dir not found: $CROSSTALK_ROOT/run-$RUN_ID" >&2
+      echo "Next: RUN_ID 확인 ('ls $CROSSTALK_ROOT/'). 또는 이미 정리된 run일 수 있음." >&2
+      exit 1
+    fi
+
+    # peers는 manifest의 peers 객체에서 surface 추출
+    NOTIFIED=0
+    while read -r SURFACE; do
+      [ -z "$SURFACE" ] && continue
+      cmux send --surface "$SURFACE" "/goal clear" >/dev/null 2>&1 || true
+      cmux send-key --surface "$SURFACE" enter >/dev/null 2>&1 || true
+      sleep 0.3
+      cmux send --surface "$SURFACE" "[crosstalk:cowork-stop] cowork run-$RUN_ID 강제 종료. 현재 진행분 그대로 두고 작업 멈춰." >/dev/null 2>&1 || true
+      cmux send-key --surface "$SURFACE" enter >/dev/null 2>&1 || true
+      NOTIFIED=$((NOTIFIED + 1))
+    done < <(jq -r '.peers // {} | to_entries[] | .value' "$MANIFEST" 2>/dev/null)
+
+    echo "OK notified=$NOTIFIED peers (RUN_ID=$RUN_ID)"
+    ;;
+
   show-last)
     # 마지막 run 경로 한 줄 + 1줄 요약 (analysis.md or summary.md 첫 의미 있는 줄)
     LAST_DIR="$HOME/.crosstalk/last"
