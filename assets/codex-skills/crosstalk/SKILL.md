@@ -12,6 +12,7 @@ This is a dispatcher. Do not inline every workflow from memory. Read exactly one
 - No arguments: read `readiness.md`.
 - Plain topic: read `analyze.md`.
 - `analyze ...`: read `analyze.md`.
+- `ask ...`: read `ask.md`.
 - `cowork ...`: read `cowork.md`.
 - `cowork-stop ...`: read `cowork-stop.md`.
 - `resume`: read `resume.md`.
@@ -19,6 +20,7 @@ This is a dispatcher. Do not inline every workflow from memory. Read exactly one
 - `status`: read `status.md`.
 - Incoming trigger `[crosstalk] preamble <agent> RUN_ID=...`: read `analyze.md`.
 - Incoming trigger `[crosstalk] round <NN> <agent> RUN_ID=...`: read `analyze.md`.
+- Incoming trigger `[crosstalk] ask <agent> RUN_ID=...`: read `ask.md`.
 - Incoming trigger `[crosstalk] cowork-task <agent> RUN_ID=...`: read `cowork.md`.
 - Incoming trigger `[crosstalk] review-round <NN> <agent> RUN_ID=...`: read `review.md`.
 

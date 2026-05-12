@@ -1,7 +1,7 @@
 # Crosstalk
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.6.0-blue)
+![Version](https://img.shields.io/badge/version-0.7.0-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-black)
 
@@ -26,6 +26,7 @@ Unlike headless multi-agent tools, Crosstalk keeps the work visible. You watch e
 - **Topic preservation across cmux entry**: call `/crosstalk` outside cmux, then `/crosstalk:resume` inside — your topic is kept.
 - **PR review mode** *(advanced)*: moderator-driven review using `gh pr diff`.
 - **Co-work mode** *(v0.4.0+)*: each peer runs its own `/goal` to deliver part of a task in parallel, isolated in git worktrees. Crosstalk fans out the assignment, enforces a time cap, and collects results.
+- **Ask mode** *(v0.7.0+)*: lightweight opinion sampling. Each peer answers once in its own pane — no debate, no ping-pong, no aggregation. Use when you want quick parallel takes instead of consensus.
 
 ## Requirements
 
@@ -136,6 +137,7 @@ Deep PR review is experimental — `/crosstalk:review --deep 1440` checks out th
 | `/crosstalk <topic>` | **Single entrypoint.** Runs analyze; inline-handles missing setup; preserves topic across cmux entry. |
 | `/crosstalk` | Empty call → readiness doctor (installed / cmux / peers + next single action). |
 | `/crosstalk:analyze <topic>` | Explicit analyze. Independent multi-agent analysis with conditional ping-pong, ends in consensus or respectful divergence. |
+| `/crosstalk:ask <question>` | **Lightweight opinion sampling (v0.7.0+).** Each peer answers once in its own pane. No debate, no ping-pong, no aggregation. |
 | `/crosstalk:resume` | Resume a topic that was preserved when `/crosstalk` was called outside cmux. |
 | `/crosstalk:cowork "claude=A, codex=B, goal=Y"` | **Co-work mode (v0.4.0+).** Each peer runs its own `/goal` in its own CLI to deliver a piece of the task in parallel. Worktree-isolated by default. |
 | `/crosstalk:cowork-stop [RUN_ID]` | Stop an in-flight cowork run. Sends `/goal clear` + termination notice to every peer. |
@@ -150,6 +152,7 @@ Run these from a Codex pane after `/crosstalk:install` has installed `~/.codex/s
 | --- | --- |
 | `$crosstalk <topic>` | Codex caller entrypoint. Runs analyze and uses Codex as the moderator. |
 | `$crosstalk analyze [--rules <name>] [--persona <name>] <topic>` | Explicit analyze from Codex. |
+| `$crosstalk ask <question>` | Lightweight opinion sampling from Codex (v0.7.0+). |
 | `$crosstalk cowork "claude=A, gemini=B, goal=Y"` | Start co-work mode from Codex. |
 | `$crosstalk cowork-stop [RUN_ID]` | Stop an in-flight cowork run from Codex. |
 | `$crosstalk resume` | Resume a preserved topic from Codex. |
