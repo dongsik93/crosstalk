@@ -1,8 +1,8 @@
-# $crosstalk ask
+# $crosstalk ask — fire-and-forget
 
-Quick opinion sampling from Codex as the moderator. Each peer answers once. No debate, no ping-pong, no verdict markers.
+Quick opinion sampling. Caller fans out the question and answers in its own pane. Peers answer in their own panes. No ping, no callback, no aggregation.
 
-## Trigger reception
+## Trigger reception (peer side)
 
 For incoming peer trigger:
 
@@ -16,7 +16,7 @@ Do not answer the trigger directly. Instead:
 cat /tmp/crosstalk/run-${RUN_ID}/preambles/<agent>.md
 ```
 
-Follow the procedure in that file: write your answer to `responses/<agent>-r01.md` and call ping.
+Read the preamble. Then **print your answer to your own pane and stop**. Do not call ping, do not write any response file.
 
 ## Caller flow ($crosstalk ask <question>)
 
@@ -34,7 +34,7 @@ $crosstalk ask <question>
 
 Run the checks from `readiness.md`. If outside cmux, save the question with `pending-save` and stop. If no peers are available, ask the user to launch.
 
-### Start run
+### Start run (preambles only)
 
 ```bash
 PEERS_RAW=$(~/.claude/scripts/crosstalk_bridge.sh list-peers)
@@ -44,34 +44,13 @@ RUN_ID=$(CROSSTALK_MODERATOR_KIND=codex ~/.claude/scripts/crosstalk_bridge.sh st
 RUN_DIR="/tmp/crosstalk/run-${RUN_ID}"
 MANIFEST="$RUN_DIR/manifest.json"
 
-MODERATOR_KIND=$(jq -r '.moderator_kind // "codex"' "$MANIFEST")
-AGENTS=("$MODERATOR_KIND")
-for p in $PEERS; do
-  AGENTS+=("${p#*|}")
-done
-
 TMP=$(mktemp)
-jq --arg mode ask \
-   --argjson round 1 \
-   --argjson agents "$(printf '%s\n' "${AGENTS[@]}" | jq -R . | jq -s .)" \
-   '. + {mode: $mode, agents: $agents, current_round: $round}' \
-   "$MANIFEST" > "$TMP" && mv "$TMP" "$MANIFEST"
+jq --arg mode ask '. + {mode: $mode}' "$MANIFEST" > "$TMP" && mv "$TMP" "$MANIFEST"
 ```
 
-### Codex's own answer
+### Fan-out (no ping instruction inside)
 
-Write your own answer to `responses/${MODERATOR_KIND}-r01.md` and ping yourself before fan-out (so the user sees Codex's pane respond too):
-
-```bash
-cat > "$RUN_DIR/responses/${MODERATOR_KIND}-r01.md" <<'EOF'
-<your answer in your own way>
-EOF
-~/.claude/scripts/crosstalk_bridge.sh ping "$RUN_ID" "$MODERATOR_KIND" 1
-```
-
-### Fan-out
-
-For each peer, write a minimal preamble to `preambles/<agent>.md` and send the trigger:
+For each peer, write a minimal preamble and send the trigger:
 
 ```bash
 mkdir -p "$RUN_DIR/preambles"
@@ -83,18 +62,16 @@ for entry in $PEERS; do
   cat > "$PREAMBLE_FILE" <<CROSSTALK_ASK
 [Crosstalk ask]
 
-The user is asking everyone the same question. Answer it once, in your own way.
-This is not a debate. There is no follow-up round. No verdict markers required.
+The user is asking everyone the same question. Answer it once, in your own way,
+right here in your pane. This is fire-and-forget:
+
+- No debate, no follow-up round, no verdict markers required.
+- Do NOT call any ping or bridge command.
+- Do NOT write any response file.
+- Just print your answer to your own pane and stop.
 
 === Question (user's raw input) ===
 ${TOPIC}
-
-=== How to respond ===
-cat > /tmp/crosstalk/run-${RUN_ID}/responses/${PEER_KIND}-r01.md <<'EOF'
-<your answer here — any length, any form>
-EOF
-
-~/.claude/scripts/crosstalk_bridge.sh ping ${RUN_ID} ${PEER_KIND} 1
 CROSSTALK_ASK
 
   TRIGGER="[crosstalk] ask ${PEER_KIND} RUN_ID=${RUN_ID}"
@@ -103,28 +80,26 @@ CROSSTALK_ASK
 done
 ```
 
-### After fan-out
+### Codex's own answer (immediate, in own pane)
 
-Stop and wait for the bridge callback. The bridge will send `$crosstalk callback ...` to this Codex pane when peers ping.
+Print Codex's answer right in this pane. Do not write to any file, do not ping. Just answer:
 
-### Callback handling
-
-When all participants have pinged (use the same all-done check as `callback.md`):
-
-- Do not aggregate, summarize, or re-print peer answers.
-- Each peer already wrote its answer in its own pane and on disk.
-- Output only:
-
-```bash
-LAST=$(~/.claude/scripts/crosstalk_bridge.sh register-last "$RUN_ID")
-echo "✅ ask done — RUN_ID=$RUN_ID"
-echo "📁 responses: $RUN_DIR/responses/  (last: $LAST)"
+```text
+🟧 Codex:
+<your answer in your own way>
 ```
 
-The user will look at each peer pane directly.
+### Final one-liner
+
+```bash
+echo "✅ ask done — peers will answer in their own panes."
+echo "📁 RUN_ID=$RUN_ID  (preambles: $RUN_DIR/preambles/)"
+```
+
+That's it. No callback will arrive. The user reads each peer pane directly.
 
 ## Notes
 
-- ask is *opinion sampling*, not analysis. If the user wants consensus or divergence judgment, route to `analyze.md`.
-- Peer answers are free-form. Do not enforce length or `[AGREE]` markers.
-- No ping-pong rounds.
+- ask is fire-and-forget. The caller does not wait for peers. There is no `$crosstalk callback ...` for ask runs.
+- Peer answers stay in each peer's own pane. The caller does not aggregate them.
+- If the user wants consensus or a verdict, route to `analyze.md`.

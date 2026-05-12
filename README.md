@@ -1,7 +1,7 @@
 # Crosstalk
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.7.0-blue)
+![Version](https://img.shields.io/badge/version-0.7.1-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-black)
 
@@ -26,7 +26,7 @@ Unlike headless multi-agent tools, Crosstalk keeps the work visible. You watch e
 - **Topic preservation across cmux entry**: call `/crosstalk` outside cmux, then `/crosstalk:resume` inside — your topic is kept.
 - **PR review mode** *(advanced)*: moderator-driven review using `gh pr diff`.
 - **Co-work mode** *(v0.4.0+)*: each peer runs its own `/goal` to deliver part of a task in parallel, isolated in git worktrees. Crosstalk fans out the assignment, enforces a time cap, and collects results.
-- **Ask mode** *(v0.7.0+)*: lightweight opinion sampling. Each peer answers once in its own pane — no debate, no ping-pong, no aggregation. Use when you want quick parallel takes instead of consensus.
+- **Ask mode** *(v0.7.0+, fire-and-forget since v0.7.1)*: lightweight opinion sampling. Caller fans out the question, answers in its own pane, and exits. Each peer answers in its own pane. No ping, no callback, no aggregation — use when you want quick parallel takes instead of consensus.
 
 ## Requirements
 

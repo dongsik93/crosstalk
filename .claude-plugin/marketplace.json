@@ -5,13 +5,13 @@
   },
   "metadata": {
     "description": "Multi-agent analysis, ask, and co-work via cmux split panes — file-backed prompts, short cmux triggers, Claude or Codex caller.",
-    "version": "0.7.0"
+    "version": "0.7.1"
   },
   "plugins": [
     {
       "name": "crosstalk",
       "description": "cmux-based multi-agent analysis + ask + co-work with file-based messaging and experimental Codex caller support via $crosstalk.",
-      "version": "0.7.0",
+      "version": "0.7.1",
       "author": {
         "name": "dongsik93"
       },
