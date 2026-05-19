@@ -15,7 +15,8 @@ argument-hint: (인자 없음)
 
 **제거 안 함**:
 - 플러그인 자체 (마켓에서 install된 것) → `/plugin uninstall crosstalk` 사용
-- npm 글로벌 패키지 (claude/codex/gemini) → 사용자가 직접 `npm uninstall -g`
+- npm 글로벌 패키지 (claude/codex) → 사용자가 직접 `npm uninstall -g`
+- antigravity(`agy`) standalone 바이너리 → 사용자가 직접 삭제 (보통 `~/.local/bin/agy`)
 - 토론 로그 (`~/Documents/crosstalk/`) → 사용자가 직접
 - cmux 자체 → 사용자가 직접
 
@@ -79,7 +80,8 @@ To remove the marketplace plugin itself:
   /plugin uninstall crosstalk
 
 These remain installed unless removed manually:
-  - npm packages: claude / codex / gemini
+  - npm packages: claude / codex
+  - antigravity (agy): standalone binary (e.g. ~/.local/bin/agy)
   - Codex skill: ~/.codex/skills/crosstalk/
   - cmux
   - logs: ~/Documents/crosstalk/
@@ -93,7 +95,8 @@ ko:
   /plugin uninstall crosstalk
 
 다음 항목은 그대로 남아있습니다 (필요시 직접 제거):
-  - npm 패키지: claude / codex / gemini  (npm uninstall -g)
+  - npm 패키지: claude / codex  (npm uninstall -g)
+  - antigravity(agy): standalone 바이너리 직접 삭제 (보통 ~/.local/bin/agy)
   - Codex skill: ~/.codex/skills/crosstalk/
   - cmux: brew uninstall --cask cmux
   - 토론 로그: ~/Documents/crosstalk/  (필요시 rm -rf)

@@ -18,7 +18,7 @@ fi
 
 if [ "$CMUX" = "inside" ]; then
   PEERS=$("$BRIDGE" list-peers 2>/dev/null \
-    | awk -F'\t' '$2 ~ /^(claude|codex|gemini)$/' \
+    | awk -F'\t' '$2 ~ /^(claude|codex|antigravity)$/' \
     | wc -l | tr -d ' ')
 else
   PEERS="?"

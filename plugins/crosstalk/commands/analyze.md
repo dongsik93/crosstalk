@@ -28,7 +28,7 @@ argument-hint: <분석 주제 / 자료 본문>
 ## 전제 조건
 
 - cmux 환경에서 실행 중
-- 본인 외 cmux split 안에 다른 AI CLI(Codex/Gemini) 1개 이상 있음 (없으면 `/crosstalk:launch` 안내 후 종료)
+- 본인 외 cmux split 안에 다른 AI CLI(Codex/Antigravity) 1개 이상 있음 (없으면 `/crosstalk:launch` 안내 후 종료)
 - bridge 스크립트 설치 완료
 
 ## 트리거 수신 규약 (v0.6.0+)
@@ -90,9 +90,9 @@ PERSONA_FILE="$HOME/.claude/crosstalk/personas/${LANGUAGE}/${PERSONA_NAME}.md"
 # 자기 자신 제외한 cmux pane 목록 — <surface>\t<kind> 형식
 PEERS_RAW=$(~/.claude/scripts/crosstalk_bridge.sh list-peers)
 
-# kind가 claude/codex/gemini 인 것만 추출.
+# kind가 claude/codex/antigravity 인 것만 추출.
 # awk 표현식은 반드시 single-quote로 감싸 셸 변수 치환을 방지한다 ($2는 awk 필드 참조).
-PEERS=$(printf '%s\n' "$PEERS_RAW" | awk -F'\t' '$2 ~ /^(claude|codex|gemini)$/ {print $1"|"$2}')
+PEERS=$(printf '%s\n' "$PEERS_RAW" | awk -F'\t' '$2 ~ /^(claude|codex|antigravity)$/ {print $1"|"$2}')
 ```
 
 `PEERS`가 비어있으면 `/crosstalk:launch` 안내 후 종료.
@@ -260,7 +260,7 @@ for entry in $PEERS; do
 
 🟦 ${MODERATOR_KIND}: <한 줄 결론>
 🟧 codex:   <한 줄 결론>
-🟪 gemini:  <한 줄 결론>   ← 3자일 때만
+🟪 antigravity:  <한 줄 결론>   ← 3자일 때만
 
 핵심 이견: <어느 가정/우선순위에서 갈렸는지 — 호출자가 한 줄 정리>
 
@@ -350,7 +350,7 @@ done
 
 🟦 <moderator>: <결론> (근거: ...) [verdict: ${VERDICT}, conf: ${CONF}]
 🟧 codex:   <결론> (근거: ...) [verdict: ${VERDICT}, conf: ${CONF}]
-🟪 gemini:  <결론> (근거: ...) [verdict: ${VERDICT}, conf: ${CONF}]
+🟪 antigravity:  <결론> (근거: ...) [verdict: ${VERDICT}, conf: ${CONF}]
 
 핵심 이견: <어느 가정/우선순위에서 갈렸는지>
 
@@ -365,7 +365,7 @@ done
 각 참가자 마지막 입장:
 🟦 <moderator>: ...
 🟧 codex:   ...
-🟪 gemini:  ...
+🟪 antigravity:  ...
 
 (추가 라운드를 원하면 같은 주제로 다시 호출)
 ```
@@ -399,20 +399,20 @@ echo "📁 last: $LAST_DIR  (또는 $RUN_DIR)"
   done/
     <moderator>-r01   # ping 마커
     codex-r01
-    gemini-r01
+    antigravity-r01
     <moderator>-r02
     ...
   responses/
     <moderator>-r01.md # 라운드별 답변 본문
     codex-r01.md
-    gemini-r01.md
+    antigravity-r01.md
     ...
   preambles/
     codex.md          # 1라운드 fan-out 본문
-    gemini.md
+    antigravity.md
   rounds/
     r02-codex.md      # 핑퐁 라운드 본문
-    r02-gemini.md
+    r02-antigravity.md
   analysis.md         # 최종 산출물
 ```
 

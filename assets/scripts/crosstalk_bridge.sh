@@ -3,15 +3,15 @@
 #
 # 명령:
 #   crosstalk_bridge.sh peer                       → 상대 surface ID 자동 감지 (본인 제외, 첫 번째)
-#   crosstalk_bridge.sh detect <surface>           → 해당 surface의 CLI 종류 (claude/codex/gemini/shell/unknown)
+#   crosstalk_bridge.sh detect <surface>           → 해당 surface의 CLI 종류 (claude/codex/antigravity/shell/unknown)
 #                                                  1순위: cmux 탭 라벨 (ct-* 접두사)
 #                                                  2순위: 화면 푸터 패턴 매칭
 #                                                  3순위: unknown
 #   crosstalk_bridge.sh list-peers                 → 본인 제외 모든 surface와 CLI 종류 (탭 구분)
 #   crosstalk_bridge.sh list-all                   → 본인 포함 모든 surface (탭 구분, 본인은 self 마킹)
-#   crosstalk_bridge.sh label <surface> <kind>     → cmux 탭에 ct-<kind> 라벨 박기 (kind: claude/codex/gemini/shell)
+#   crosstalk_bridge.sh label <surface> <kind>     → cmux 탭에 ct-<kind> 라벨 박기 (kind: claude/codex/antigravity/shell)
 #   crosstalk_bridge.sh get-label <surface>        → 라벨에서 ct-* 부분 추출 (없으면 빈 줄)
-#   crosstalk_bridge.sh send <surface> <text>      → 상대에게 텍스트 + Enter 전송 (Gemini/Codex는 Enter 2회)
+#   crosstalk_bridge.sh send <surface> <text>      → 상대에게 텍스트 + Enter 전송 (claude/codex/antigravity는 Enter 2회)
 #   crosstalk_bridge.sh send-via-file <surface> <body-file> <trigger-msg>
 #                                                  → body-file 존재 검증 후 짧은 trigger-msg만 send.
 #                                                  긴 본문은 caller가 이미 디스크에 저장해둔 것을 peer가 cat.
@@ -24,7 +24,7 @@
 #                                                  파일 기반 transport 도입으로 더 이상 내부에서 사용하지 않음.
 #                                                  외부 호환을 위해 커맨드는 남김. v0.2.0에서 제거 예정.
 #   crosstalk_bridge.sh wait-ready <surface> <expected-kind>
-#                                                  → 해당 surface의 CLI(<expected-kind>: claude/codex/gemini)가
+#                                                  → 해당 surface의 CLI(<expected-kind>: claude/codex/antigravity)가
 #                                                  실제로 떠서 입력 가능한 상태가 될 때까지 대기.
 #                                                  ※ 라벨은 보지 않고 화면 푸터 패턴만 검사 (라벨이 미리 박혀있어도 무시).
 #                                                  stderr 출력:
@@ -77,8 +77,8 @@ self_surface() {
 # 라벨은 보지 않는다 — 호출 측에서 필요하면 별도로 합쳐 쓸 것.
 detect_kind_from_screen() {
   local SCREEN="$1"
-  if echo "$SCREEN" | grep -qE 'GEMINI\.md files|gemini-[0-9]+(\.[0-9]+)?[[:space:]]*\(default\)'; then
-    echo "gemini"
+  if echo "$SCREEN" | grep -qE 'Antigravity CLI|Gemini [0-9]+(\.[0-9]+)?[[:space:]]+(Flash|Pro)'; then
+    echo "antigravity"
   elif echo "$SCREEN" | grep -qE '\bgpt-[0-9]+(\.[0-9]+)?[[:space:]]+default[[:space:]]+·|Token usage: total='; then
     echo "codex"
   elif echo "$SCREEN" | grep -qE '◐ [a-z]+ · /effort|⏵⏵ accept edits on'; then
@@ -128,8 +128,8 @@ validate_nonnegative_int() {
 
 validate_agent() {
   case "$1" in
-    claude|codex|gemini) return 0 ;;
-    *) echo "ERROR: invalid agent '$1' (expected claude/codex/gemini)" >&2; return 1 ;;
+    claude|codex|antigravity) return 0 ;;
+    *) echo "ERROR: invalid agent '$1' (expected claude/codex/antigravity)" >&2; return 1 ;;
   esac
 }
 
@@ -196,12 +196,12 @@ case "$CMD" in
 
   label)
     # cmux 탭 이름을 ct-<kind> 로 설정
-    # kind: claude / codex / gemini / shell
+    # kind: claude / codex / antigravity / shell
     SURFACE="${1:?surface required}"
-    KIND="${2:?kind required (claude/codex/gemini/shell)}"
+    KIND="${2:?kind required (claude/codex/antigravity/shell)}"
     case "$KIND" in
-      claude|codex|gemini|shell) ;;
-      *) echo "ERROR: invalid kind '$KIND' (use claude/codex/gemini/shell)" >&2; exit 1 ;;
+      claude|codex|antigravity|shell) ;;
+      *) echo "ERROR: invalid kind '$KIND' (use claude/codex/antigravity/shell)" >&2; exit 1 ;;
     esac
     cmux rename-tab --surface "$SURFACE" "ct-${KIND}" >/dev/null
     echo "OK: $SURFACE → ct-${KIND}"
@@ -221,10 +221,10 @@ case "$CMD" in
       if [ -n "$LINE" ]; then
         # ct-<kind> 패턴이면 kind만 추출
         case "$LINE" in
-          ct-claude*) LABEL="claude" ;;
-          ct-codex*)  LABEL="codex" ;;
-          ct-gemini*) LABEL="gemini" ;;
-          ct-shell*)  LABEL="shell" ;;
+          ct-claude*)      LABEL="claude" ;;
+          ct-codex*)       LABEL="codex" ;;
+          ct-antigravity*) LABEL="antigravity" ;;
+          ct-shell*)       LABEL="shell" ;;
         esac
         break
       fi
@@ -268,22 +268,13 @@ case "$CMD" in
     # paste-bracket / 입력 처리 안정화:
     # 긴 텍스트가 한 번에 들어가면 첫 Enter가 텍스트의 일부로 흡수되거나,
     # 입력창이 paste 종료 처리 중이라 첫 Enter가 무시되는 케이스가 있다.
-    # → claude/codex 는 잠시 기다렸다가 한 번 더 Enter 보내 실제 전송 보장.
-    # ⚠️ Gemini CLI는 두 번째 Enter를 *별도 submit*으로 받아들여 같은 메시지를
-    #     여러 번 답하는 사고가 생김. 그래서 gemini는 Enter 1회만.
-    #     gemini의 paste-bracket 흡수 사고는 SEND_GEMINI_RETRY=1 환경변수로 1회 재전송 가능.
+    # → 잠시 기다렸다가 한 번 더 Enter 보내 실제 전송 보장.
+    #   claude/codex/antigravity 모두 두 번째 Enter를 중복 submit으로 받지 않는다.
     KIND=$("$0" detect "$SURFACE")
     case "$KIND" in
-      codex|claude)
+      codex|claude|antigravity)
         sleep 0.5
         cmux send-key --surface "$SURFACE" enter >/dev/null
-        ;;
-      gemini)
-        # 기본은 Enter 1회. SEND_GEMINI_RETRY=1 이면 안전한 1회 더 (paste 흡수 의심 시).
-        if [ "${SEND_GEMINI_RETRY:-0}" = "1" ]; then
-          sleep 0.8
-          cmux send-key --surface "$SURFACE" enter >/dev/null
-        fi
         ;;
     esac
     ;;
@@ -325,10 +316,9 @@ case "$CMD" in
         # Claude: 사용자 입력 라인 앞에 "❯ " (있는 그대로의 라인)
         echo "$CONTENT" | grep -c '^❯[[:space:]]' || true
         ;;
-      gemini)
-        # Gemini: 사용자 메시지 앞에 "│ > " 또는 "✦" 등 — 가장 일관된 건 ✦ Working… 상태선
-        # 답변마다 ✦ 가 하나씩 추가됨
-        echo "$CONTENT" | grep -c '✦' || true
+      antigravity)
+        # Antigravity: 사용자 메시지 앞에 "> " 프롬프트 라인. 메시지마다 하나씩 추가됨.
+        echo "$CONTENT" | grep -c '^> ' || true
         ;;
       *)
         echo 0
@@ -686,7 +676,7 @@ case "$CMD" in
     # 라벨 무시. 화면 푸터 패턴만으로 expected-kind와 일치하는지 확인.
     # 일치 → ready (exit 0). OAuth/로그인 화면 감지 → auth-needed (exit 2). 시간 초과 → timeout (exit 1).
     SURFACE="${1:?surface required}"
-    KIND="${2:?expected-kind required (claude/codex/gemini)}"
+    KIND="${2:?expected-kind required (claude/codex/antigravity)}"
     validate_agent "$KIND" || exit 1
 
     READY_MAX_WAIT="${READY_MAX_WAIT:-20}"
@@ -742,9 +732,9 @@ case "$CMD" in
     fi
     case "$MOD_KIND" in
       claude|codex) ;;
-      gemini)
+      antigravity)
         rm -rf "$RUN_DIR"
-        echo "ERROR: Gemini caller mode is not supported in Crosstalk v0.6.0" >&2
+        echo "ERROR: Antigravity caller mode is not supported — Antigravity participates as a peer only." >&2
         echo "Next: start the run from Claude (/crosstalk) or Codex (\$crosstalk)." >&2
         exit 1
         ;;
@@ -781,7 +771,7 @@ EOF
     # run-<id>-r<NN>-<agent>-a<N>
     RUN_ID="${1:?run-id required}"
     ROUND="${2:?round required}"
-    AGENT="${3:?agent required (claude/codex/gemini)}"
+    AGENT="${3:?agent required (claude/codex/antigravity)}"
     ATTEMPT="${4:?attempt required}"
     validate_run_id "$RUN_ID" || exit 1
     validate_positive_int "$ROUND" "round" || exit 1
@@ -794,9 +784,9 @@ EOF
     # 응답 파일이 안정될 때까지 대기.
     #
     # TRANSPORT_MODE (env):
-    #   file (기본)   — AI가 직접 RESP_FILE 에 답변 본문을 쓴다 (claude/codex 권장).
+    #   file (기본)   — AI가 직접 RESP_FILE 에 답변 본문을 쓴다 (claude/codex/antigravity 모두 권장).
     #   screen        — AI는 화면에 'CROSSTALK_BEGIN <msg-id>' ~ 'CROSSTALK_END <msg-id>' 블록만 출력한다.
-    #                   bridge가 매 tick scrollback에서 추출해서 RESP_FILE 에 직접 저장 (gemini 등 agentic CLI용).
+    #                   bridge가 매 tick scrollback에서 추출해서 RESP_FILE 에 직접 저장 (파일/툴 못 쓰는 CLI용 폴백).
     #
     # msg-id 형식: run-<id>-r<NN>-<agent>-a<N>
     # 응답 파일: /tmp/crosstalk/run-<id>/responses/<agent>-r<NN>-a<N>.md
@@ -991,7 +981,7 @@ EOF
     # AI는 한 줄만:
     #   ~/.claude/scripts/crosstalk_bridge.sh ping <RUN_ID> <YOUR_AGENT> <ROUND>
     RUN_ID="${1:?run-id required}"
-    AGENT="${2:?agent required (claude/codex/gemini)}"
+    AGENT="${2:?agent required (claude/codex/antigravity)}"
     ROUND="${3:?round required}"
     validate_run_id "$RUN_ID" || exit 1
     validate_agent "$AGENT" || exit 1
@@ -1050,7 +1040,7 @@ EOF
     # transport=off 흐름에서 사용 — 답변 본문은 화면에 그대로 두고, 완료 신호만 파일로 받는다.
     # ping 경로: $CROSSTALK_ROOT/run-<id>/done/<agent>-r<NN>
     RUN_ID="${1:?run-id required}"
-    AGENT="${2:?agent required (claude/codex/gemini)}"
+    AGENT="${2:?agent required (claude/codex/antigravity)}"
     ROUND="${3:?round required}"
     validate_run_id "$RUN_ID" || exit 1
     validate_agent "$AGENT" || exit 1

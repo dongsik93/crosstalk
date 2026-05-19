@@ -18,7 +18,7 @@ argument-hint: (인자 없음)
 - macOS (cmux는 macOS 전용)
 - cmux 설치됨 (`brew install --cask cmux`)
 - `/crosstalk:install` 1회 실행 완료
-- AI CLI들이 설치되고 인증됨 (claude/codex/gemini 중 사용할 것들)
+- AI CLI들이 설치되고 인증됨 (claude/codex/antigravity 중 사용할 것들)
 
 ---
 
@@ -84,7 +84,7 @@ Next:
   2. cmux 안에서 claude 실행
   3. 그 claude에서 /crosstalk:install 한 번
   4. 그 다음 /crosstalk:launch 다시 호출
-     → 자동으로 split + Codex/Gemini 시작 + 라벨링까지 완료됨
+     → 자동으로 split + Codex/Antigravity 시작 + 라벨링까지 완료됨
 ```
 
 이 단계에서 종료. **외부에서는 cmux를 띄우는 것 외에 자동 셋업 불가**.
@@ -113,7 +113,7 @@ fi
 ```bash
 HAS_CLAUDE=$(which claude >/dev/null && echo true || echo false)
 HAS_CODEX=$(which codex >/dev/null && echo true || echo false)
-HAS_GEMINI=$(which gemini >/dev/null && echo true || echo false)
+HAS_AGY=$(which agy >/dev/null && echo true || echo false)   # antigravity 바이너리
 ```
 
 설치 안 된 CLI는 옵션에서 제외.
@@ -122,7 +122,7 @@ HAS_GEMINI=$(which gemini >/dev/null && echo true || echo false)
 
 ```bash
 SELF_KIND=$(~/.claude/scripts/crosstalk_bridge.sh detect "$SELF_SURFACE")
-# claude / codex / gemini / shell / unknown
+# claude / codex / antigravity / shell / unknown
 ```
 
 본인이 이미 AI CLI라면 그 pane엔 다시 명령 안 보냄. 본인 라벨도 자동으로 박아둠.
@@ -138,11 +138,11 @@ SELF_KIND=$(~/.claude/scripts/crosstalk_bridge.sh detect "$SELF_SURFACE")
 
 본인이 claude인 경우:
 - "Codex 추가 (좌:claude, 우:codex)" — 본인 + codex 1개
-- "Gemini 추가 (좌:claude, 우:gemini)"
-- "Codex + Gemini 추가 (좌:claude, 우상:codex, 우하:gemini)"
+- "Antigravity 추가 (좌:claude, 우:antigravity)"
+- "Codex + Antigravity 추가 (좌:claude, 우상:codex, 우하:antigravity)"
 - "취소"
 
-본인이 codex/gemini/shell이면 본인 종류에 맞춰 옵션 구성. (본인이 unknown이면 *수동으로 라벨 박은 후 재실행* 안내).
+본인이 codex/antigravity/shell이면 본인 종류에 맞춰 옵션 구성. (본인이 unknown이면 *수동으로 라벨 박은 후 재실행* 안내).
 
 설치 안 된 CLI는 옵션에서 자동 제외.
 
@@ -193,24 +193,46 @@ fi
 
 ### 3-9. 각 새 surface에서 AI CLI 시작
 
-**사용자 선택을 (NEW_SURFACE_n, SURFACE_KIND_n) 매핑으로 명시.** 그래야 "Gemini만 추가" 같이 단일 추가 케이스에서도 NEW_SURFACE_1=gemini로 정확히 들어간다. 하드코딩(첫 번째는 무조건 codex) 금지.
+**사용자 선택을 (NEW_SURFACE_n, SURFACE_KIND_n) 매핑으로 명시.** 그래야 "Antigravity만 추가" 같이 단일 추가 케이스에서도 NEW_SURFACE_1=antigravity로 정확히 들어간다. 하드코딩(첫 번째는 무조건 codex) 금지.
 
 선택 → 매핑 규칙 (본인은 이미 떠있는 CLI, 명령 안 보냄):
 
 | 사용자 선택 | NEW_SURFACE_1 | SURFACE_KIND_1 | NEW_SURFACE_2 | SURFACE_KIND_2 |
 |------------|---------------|----------------|---------------|----------------|
 | Codex만 추가 | (split 1)    | `codex`        | ""            | ""             |
-| Gemini만 추가 | (split 1)   | `gemini`       | ""            | ""             |
-| Codex + Gemini 추가 | (split 1) | `codex`    | (split 2)     | `gemini`       |
+| Antigravity만 추가 | (split 1) | `antigravity` | ""           | ""             |
+| Codex + Antigravity 추가 | (split 1) | `codex` | (split 2)   | `antigravity`  |
+
+> **kind ≠ 실행 명령어 주의**: `claude`/`codex`는 kind 이름이 곧 바이너리지만 `antigravity`의 바이너리는 `agy`다. 아래 `kind_to_cmd` 매핑으로 변환해서 띄운다. (`antigravity` → `agy --dangerously-skip-permissions`. 권한 자동승인 플래그가 있어야 file 모드에서 응답 파일을 막힘 없이 쓴다.)
 
 ```bash
+# kind → 실제 실행 명령어
+kind_to_cmd() {
+  case "$1" in
+    claude)      echo "claude" ;;
+    codex)       echo "codex" ;;
+    antigravity) echo "agy --dangerously-skip-permissions" ;;
+    *)           echo "$1" ;;
+  esac
+}
+
 # 위 표대로 SURFACE_KIND_1 / SURFACE_KIND_2 를 사용자 선택에 맞춰 설정한 뒤:
-~/.claude/scripts/crosstalk_bridge.sh send "$NEW_SURFACE_1" "$SURFACE_KIND_1"
+~/.claude/scripts/crosstalk_bridge.sh send "$NEW_SURFACE_1" "$(kind_to_cmd "$SURFACE_KIND_1")"
 sleep 1
 if [ -n "$NEW_SURFACE_2" ]; then
-  ~/.claude/scripts/crosstalk_bridge.sh send "$NEW_SURFACE_2" "$SURFACE_KIND_2"
+  ~/.claude/scripts/crosstalk_bridge.sh send "$NEW_SURFACE_2" "$(kind_to_cmd "$SURFACE_KIND_2")"
   sleep 1
 fi
+
+# Antigravity 첫 실행 시 "Do you trust this folder?" 프롬프트가 뜬다 (Yes가 기본 선택).
+# Enter 1회로 통과. 이미 신뢰된 폴더면 프롬프트가 안 떠 빈 입력으로 무해(idempotent).
+for IDX in 1 2; do
+  eval "S=\$NEW_SURFACE_$IDX; K=\$SURFACE_KIND_$IDX"
+  if [ -n "$S" ] && [ "$K" = "antigravity" ]; then
+    sleep 2
+    cmux send-key --surface "$S" enter >/dev/null 2>&1 || true
+  fi
+done
 ```
 
 ### 3-10. AI CLI 시작 대기 (wait-ready 폴링)
@@ -283,7 +305,7 @@ en:
 Labeled panes:
   ✅ surface:N → claude (self)
   ✅ surface:N → codex
-  ✅ surface:N → gemini
+  ✅ surface:N → antigravity
 
 Next, run in the Claude pane:
   /crosstalk Is 1+1 equal to 2?
@@ -299,13 +321,13 @@ ko:
   ┌─────────────┬─────────────┐
   │             │   Codex     │
   │   Claude    ├─────────────┤
-  │   (현재)    │   Gemini    │
+  │   (현재)    │ Antigravity │
   └─────────────┴─────────────┘
 
 라벨링 완료:
   ✅ surface:N → claude (본인)
   ✅ surface:N → codex
-  ✅ surface:N → gemini
+  ✅ surface:N → antigravity
 
 (인증 안 된 CLI 있을 시) ⚠️ 안내 메시지.
 

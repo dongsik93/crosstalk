@@ -20,7 +20,7 @@ argument-hint: [--no-worktree] [--max-time <duration>] "claude=A 작업, codex=B
 
 ## 전제 조건
 
-- cmux 환경, split 안에 다른 CLI(Codex/Gemini) 1개 이상
+- cmux 환경, split 안에 다른 CLI(Codex/Antigravity) 1개 이상
 - bridge 설치 완료
 - `--no-worktree`가 아니면 git 레포 안
 
@@ -59,7 +59,7 @@ TASK_BODY=$(echo "$ARGS" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
 
 ```bash
 PEERS_RAW=$(~/.claude/scripts/crosstalk_bridge.sh list-peers)
-PEERS=$(printf '%s\n' "$PEERS_RAW" | awk -F'\t' '$2 ~ /^(claude|codex|gemini)$/ {print $1"|"$2}')
+PEERS=$(printf '%s\n' "$PEERS_RAW" | awk -F'\t' '$2 ~ /^(claude|codex|antigravity)$/ {print $1"|"$2}')
 ```
 
 `PEERS` 비어있으면 `/crosstalk:launch` 안내 후 종료.
@@ -282,7 +282,7 @@ worktree 정리 옵션 제시 (AskUserQuestion):
     codex-r01.md
   assignments/
     codex.md           # cowork 분담 본문
-    gemini.md
+    antigravity.md
   cowork-summary.md   # 통합 보고
 
 /tmp/crosstalk/worktrees/run-<RUN_ID>/

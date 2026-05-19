@@ -38,7 +38,7 @@ Run the checks from `readiness.md`. If outside cmux, save the question with `pen
 
 ```bash
 PEERS_RAW=$(~/.claude/scripts/crosstalk_bridge.sh list-peers)
-PEERS=$(printf '%s\n' "$PEERS_RAW" | awk -F'\t' '$2 ~ /^(claude|codex|gemini)$/ {print $1"|"$2}')
+PEERS=$(printf '%s\n' "$PEERS_RAW" | awk -F'\t' '$2 ~ /^(claude|codex|antigravity)$/ {print $1"|"$2}')
 
 RUN_ID=$(CROSSTALK_MODERATOR_KIND=codex ~/.claude/scripts/crosstalk_bridge.sh start-run)
 RUN_DIR="/tmp/crosstalk/run-${RUN_ID}"

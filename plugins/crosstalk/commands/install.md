@@ -9,7 +9,7 @@ argument-hint: [--presets-only [--language en|ko]]
 마켓에서 플러그인 설치 직후 한 번 실행. 다음을 수행:
 
 1. 사전 도구 검증 (Node.js, npm, cmux, gh, jq)
-2. 토론 참여자 CLI 검증 (claude/codex/gemini), 누락 시 npm 자동 설치 안내
+2. 토론 참여자 CLI 검증 (claude/codex는 npm, antigravity는 standalone 바이너리 `agy`), 누락 시 안내
 3. 인터페이스 언어 선택 (`en` / `ko`)
 4. Crosstalk 컴포넌트 사용자 홈에 복사
    - `~/.claude/scripts/crosstalk_bridge.sh` (cmux 통신 헬퍼)
@@ -23,7 +23,7 @@ argument-hint: [--presets-only [--language en|ko]]
 
 - ✅ Claude Code 측 컴포넌트 자동 설치
 - ✅ Codex caller용 `$crosstalk` skill 설치
-- ✅ AI CLI npm 자동 설치 (claude/codex/gemini)
+- ✅ AI CLI npm 자동 설치 (claude/codex). antigravity(`agy`)는 npm 패키지가 아니라 standalone 바이너리 — 설치 안내만
 - ⚠️ Codex caller는 experimental
   - `$crosstalk` skill + bridge callback으로 동작
   - 실제 callback 자동 진행은 cmux/Codex 버전 조합에서 확인 필요
@@ -119,7 +119,7 @@ which jq || echo "JQ_MISSING"
 # AI CLI
 which claude || echo "CLAUDE_CLI_MISSING"   # @anthropic-ai/claude-code
 which codex || echo "CODEX_MISSING"
-which gemini || echo "GEMINI_MISSING"
+which agy || echo "AGY_MISSING"              # antigravity — standalone 바이너리 (npm 아님)
 ```
 
 표시:
@@ -137,7 +137,7 @@ which gemini || echo "GEMINI_MISSING"
 [AI CLI — 토론 참여자]
   ✅ claude (현재 사용 중)
   ❌ codex 미설치
-  ❌ gemini 미설치
+  ❌ antigravity (agy) 미설치
 ```
 
 **필수 도구 누락 처리**:
@@ -146,19 +146,21 @@ which gemini || echo "GEMINI_MISSING"
 - gh 누락 → `brew install gh && gh auth login` 안내, install 자체는 진행
 - jq 누락 → `brew install jq` 안내. 룰/페르소나 config 파싱에 필수이므로 install 차단 + 사용자에게 설치 권장 후 재실행 안내
 
-## 2단계: AI CLI 자동 설치 (선택)
+## 2단계: AI CLI 설치 (선택)
 
-claude/codex/gemini 중 누락된 게 있으면 `AskUserQuestion`:
+설치 방식이 둘로 갈린다:
+- **claude / codex**: npm 패키지 → 자동 설치 가능.
+- **antigravity (`agy`)**: standalone 바이너리 → npm 설치 불가. 자동 설치 대상에서 제외하고, 누락 시 안내만.
+
+**npm 대상(claude/codex) 중 누락**이 있으면 `AskUserQuestion`:
 
 ```
 header: AI CLI 자동 설치
 question: 다음 AI CLI가 미설치입니다. npm으로 자동 설치할까요?
 (설치 후 첫 실행 시 OAuth 인증이 필요합니다.)
 
-options (동적 구성):
-  - 모두 설치 (codex + gemini)
+options (누락된 npm CLI에 맞춰 동적 구성):
   - codex만
-  - gemini만
   - 건너뛰기 (Crosstalk 컴포넌트만 설치)
   - 취소
 ```
@@ -170,21 +172,24 @@ npm install -g @anthropic-ai/claude-code@latest
 
 # codex
 npm install -g @openai/codex@latest
-
-# gemini
-npm install -g @google/gemini-cli@latest
 ```
 
 각 명령 실행 진행 상황을 사용자에게 표시:
 ```
 📦 npm install 진행 중... (각 1~3분)
-  [1/2] @openai/codex@latest 설치 중...
+  [1/1] @openai/codex@latest 설치 중...
   ✅ @openai/codex 0.128.0
-  [2/2] @google/gemini-cli@latest 설치 중...
-  ✅ @google/gemini-cli 0.41.2
 ```
 
 설치 실패 시 사용자에게 표시 + 진행 여부 결정.
+
+**antigravity(`agy`) 누락 시** — npm 설치 없이 안내만 (자동 설치 안 함):
+```
+ℹ️ Antigravity CLI(agy)가 설치되어 있지 않습니다.
+   agy는 npm 패키지가 아닌 standalone 바이너리입니다.
+   공식 배포 경로에서 `agy`를 설치한 뒤(보통 ~/.local/bin/agy) 다시 /crosstalk:install 또는 /crosstalk:setup을 실행하세요.
+   (agy 없이 claude/codex만으로도 Crosstalk은 동작합니다.)
+```
 
 ## 3단계: 인터페이스 언어 선택
 
@@ -362,13 +367,12 @@ done
 
 (npm 자동 설치 진행 시) 추가 설치된 AI CLI:
   - @openai/codex
-  - @google/gemini-cli
 
 ⚠️ Manual next steps when needed:
   - cmux (미설치 시): brew install --cask cmux
   - gh 인증: gh auth login
   - codex 첫 실행 시 OAuth 인증
-  - gemini 첫 실행 시 OAuth 인증
+  - antigravity(agy): standalone 바이너리 직접 설치 + 첫 실행 시 trust 프롬프트/OAuth
 
 Next:
   /crosstalk:launch

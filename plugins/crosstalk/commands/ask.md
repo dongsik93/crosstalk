@@ -18,7 +18,7 @@ argument-hint: <질문>
 
 ## 전제 조건
 
-- cmux 환경, split 안에 다른 AI CLI(Codex/Gemini) 1개 이상
+- cmux 환경, split 안에 다른 AI CLI(Codex/Antigravity) 1개 이상
 - bridge 설치 완료
 
 ## 트리거 수신 규약 (peer가 받는 메시지)
@@ -48,7 +48,7 @@ fi
 
 ```bash
 PEERS_RAW=$(~/.claude/scripts/crosstalk_bridge.sh list-peers)
-PEERS=$(printf '%s\n' "$PEERS_RAW" | awk -F'\t' '$2 ~ /^(claude|codex|gemini)$/ {print $1"|"$2}')
+PEERS=$(printf '%s\n' "$PEERS_RAW" | awk -F'\t' '$2 ~ /^(claude|codex|antigravity)$/ {print $1"|"$2}')
 ```
 
 `PEERS` 비어있으면 `/crosstalk:launch` 안내 후 종료.

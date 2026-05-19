@@ -18,7 +18,7 @@ Unlike headless multi-agent tools, Crosstalk keeps the work visible. You watch e
 ## Features
 
 - **Use your existing CLI subscriptions**: no separate API keys or per-token integration required.
-- **Visible multi-agent workflow**: Claude, Codex, and Gemini run in neighboring cmux panes.
+- **Visible multi-agent workflow**: Claude, Codex, and Antigravity run in neighboring cmux panes.
 - **Codex caller support** *(experimental)*: Codex can start runs with `$crosstalk`, and bridge callbacks re-enter through `$crosstalk callback ...`.
 - **Independent analysis, no knowledge pollution**: the user's raw input is fan-out unchanged — no moderator summary, no agenda setting.
 - **Deterministic verdict extraction**: `[AGREE]` / `[RESPECT_DISAGREE]` markers are parsed by the bridge, not interpreted by an LLM.
@@ -38,7 +38,7 @@ Unlike headless multi-agent tools, Crosstalk keeps the work visible. You watch e
 | jq | Yes | Used for rules/persona config |
 | GitHub CLI | Optional | Required for PR review mode |
 
-You only need the AI CLIs you plan to use. `/crosstalk:install` can help install missing Codex and Gemini CLI packages through npm.
+You only need the AI CLIs you plan to use. `/crosstalk:install` can install a missing Codex CLI through npm. Antigravity (the `agy` binary) is a standalone download — install it yourself; Crosstalk only detects it.
 
 ## Language
 
@@ -153,7 +153,7 @@ Run these from a Codex pane after `/crosstalk:install` has installed `~/.codex/s
 | `$crosstalk <topic>` | Codex caller entrypoint. Runs analyze and uses Codex as the moderator. |
 | `$crosstalk analyze [--rules <name>] [--persona <name>] <topic>` | Explicit analyze from Codex. |
 | `$crosstalk ask <question>` | Lightweight opinion sampling from Codex (v0.7.0+). |
-| `$crosstalk cowork "claude=A, gemini=B, goal=Y"` | Start co-work mode from Codex. |
+| `$crosstalk cowork "claude=A, antigravity=B, goal=Y"` | Start co-work mode from Codex. |
 | `$crosstalk cowork-stop [RUN_ID]` | Stop an in-flight cowork run from Codex. |
 | `$crosstalk resume` | Resume a preserved topic from Codex. |
 | `$crosstalk status` | Show setup and pane status from Codex. |
@@ -202,20 +202,20 @@ Example run directory:
   manifest.json          # includes moderator_surface, moderator_kind, mode, agents, current_round
   done/
     codex-r01            # ping markers (also kept for debugging)
-    gemini-r01
+    antigravity-r01
   responses/             # always populated — moderator reads from here
     codex-r01.md
-    gemini-r01.md
+    antigravity-r01.md
     claude-r01.md
   preambles/             # analyze round 1 prompts
     codex.md
-    gemini.md
+    antigravity.md
   rounds/                # analyze ping-pong and review round prompts
     r02-codex.md
-    r02-gemini.md
+    r02-antigravity.md
   assignments/           # cowork task prompts
     codex.md
-    gemini.md
+    antigravity.md
 ```
 
 File-backed channels:
@@ -306,11 +306,11 @@ Custom presets live here (each rule/persona file is loaded into the preamble ver
 - **AI may ignore transport instructions**: opt-in `--transport file/screen` modes treat this as a protocol error with retry/skip/stop choices.
 - **Deep PR review is experimental**: it touches the current git worktree through checkout/stash/restore.
 - **Codex caller is experimental**: `$crosstalk` uses Codex skills and cmux callback injection. Verify callback behavior with your Codex/cmux version before relying on long ping-pong or cowork runs.
-- **Gemini caller is not supported yet**: Gemini can participate as a peer.
+- **Antigravity caller is not supported**: Antigravity (`agy`) participates as a peer only; runs must be started from Claude or Codex.
 
 ## Roadmap
 
-- Gemini moderator mode
+- Antigravity moderator mode
 - Additional CLI adapters
 - tmux and zellij support
 - Better troubleshooting docs
@@ -324,7 +324,7 @@ Issues and pull requests are welcome. Good first contributions include:
 - updating CLI footer detection patterns
 - adding rules or persona presets
 - improving install and troubleshooting docs
-- testing against different Codex/Gemini/Claude CLI versions
+- testing against different Codex/Antigravity/Claude CLI versions
 - exploring tmux or zellij adapters
 
 ## License

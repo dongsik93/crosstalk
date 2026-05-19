@@ -33,7 +33,7 @@ fi
 if [ "$CMUX" = "inside" ]; then
   # awk 표현식은 single-quote로 감싸 셸 치환 방지 ($2는 awk 필드).
   PEERS=$(~/.claude/scripts/crosstalk_bridge.sh list-peers 2>/dev/null \
-    | awk -F'\t' '$2 ~ /^(claude|codex|gemini)$/' \
+    | awk -F'\t' '$2 ~ /^(claude|codex|antigravity)$/' \
     | wc -l | tr -d ' ')
 else
   PEERS="?"

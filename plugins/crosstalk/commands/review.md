@@ -17,7 +17,7 @@ PR diff/branch를 자료로 공유하고, 사회자(Claude)가 turn-taking으로
 
 ## 전제 조건
 
-- cmux 환경, split 안에 다른 CLI(Codex/Gemini) 1개 이상
+- cmux 환경, split 안에 다른 CLI(Codex/Antigravity) 1개 이상
 - bridge: `~/.claude/scripts/crosstalk_bridge.sh`
 - `gh` CLI 인증 완료
 - 현재 디렉토리가 git 레포
@@ -185,7 +185,7 @@ peer 검증 흐름:
    - `cmux ping` 실패 → cmux 미실행/미설치 안내 후 종료.
    - `cmux ping` 성공 → 사용자에게 안내 후 종료 (이 시점까지 stash/checkout 미수행, 정리할 것 없음):
      ```
-     🛑 cmux split 안에 다른 AI pane(Codex/Gemini)이 없어 PR 리뷰 토론을 시작할 수 없습니다.
+     🛑 cmux split 안에 다른 AI pane(Codex/Antigravity)이 없어 PR 리뷰 토론을 시작할 수 없습니다.
 
      다음 순서로 다시 시도해주세요:
        1. /crosstalk:launch
@@ -223,7 +223,7 @@ if [ "$MODE" = "deep" ]; then
   CURRENT_DIR=$(pwd)
   SHARED_LABEL="현재 디렉토리: $CURRENT_DIR (PR 브랜치 체크아웃됨), diff 참조: $DIFF_PATH"
   if [ "$LANGUAGE" = "ko" ]; then
-    SHARED_INSTR="현재 디렉토리($CURRENT_DIR)가 PR 브랜치입니다. grep/find/read로 자유롭게 분석. 코드 수정/커밋/git 작업 금지. 응답 출력 방법은 매 턴 메시지의 ═══ Transport ═══ 섹션이 알려준다 (file 모드는 응답 파일 1개 작성 허용, screen 모드는 화면 BEGIN/END 블록만)."
+    SHARED_INSTR="현재 디렉토리($CURRENT_DIR)가 PR 브랜치입니다. grep/find/read로 자유롭게 분석. 코드 수정/커밋/git 작업 금지. 응답 출력 방법은 매 턴 메시지의 ═══ Transport ═══ 섹션이 알려준다 (file 모드: 응답 파일 1개 작성 + 화면에 DONE 한 줄)."
   else
     SHARED_INSTR="The current directory ($CURRENT_DIR) is checked out to the PR branch. You may inspect files freely, but do not modify code, commit, or run git operations. The only allowed write is the response file specified by each turn's Transport section."
   fi
@@ -286,9 +286,9 @@ PR #${PR_NUM} 을 리뷰해주세요.
 
 ═══ Transport (변경 불가) ═══
 
-**AGENT가 `gemini` 면 screen 모드, 그 외(`claude`/`codex`)는 file 모드**로 다음 중 하나를 그대로 주입한다.
+**모든 AGENT(`claude`/`codex`/`antigravity`)는 file 모드**로 다음을 그대로 주입한다.
 
-[file 모드 — claude/codex]
+[file 모드 — 공통]
 이 턴 답변은 화면이 아니라 파일에 기록한다.
 1. 답변 본문 전체를 다음 파일에 그대로 써라:
      ${RUN_DIR}/responses/<RESP_BASENAME>
@@ -297,18 +297,6 @@ PR #${PR_NUM} 을 리뷰해주세요.
 
   RESP_BASENAME = <agent>-r<NN>-a<N>.md   (1단계는 r01)
   MSG_ID        = run-<run-id>-r<NN>-<agent>-a<N>
-
-[screen 모드 — gemini]
-파일에 쓰지 마라. WriteFile/Shell 도구 사용 금지.
-화면에 정확히 한 번만:
-
-  CROSSTALK_BEGIN <MSG_ID>
-  <리뷰 본문>
-  CROSSTALK_END <MSG_ID>
-
-다른 텍스트(요약/박스/진행 상황)는 출력하지 마라. 같은 답변을 여러 번 출력하지 마라.
-
-  MSG_ID = run-<run-id>-r<NN>-gemini-a<N>
 
 [PR 정보]
 - 제목: <title>
@@ -333,12 +321,12 @@ ${SHARED_INSTR}
 마지막 줄에 [REVIEW_DONE] 마커.
 ```
 
-전송 + 답변 대기 (파일 기반 transport, `MAX_WAIT`은 모드 + agent별 조합):
+전송 + 답변 대기 (파일 기반 transport, `MAX_WAIT`은 모드별):
 
-| 모드 \ agent | claude/codex 기본 | gemini |
-|---|---|---|
-| fast | 600s | 900s |
-| deep | 1800s | 2400s |
+| 모드 | MAX_WAIT |
+|---|---|
+| fast | 600s |
+| deep | 1800s |
 
 활동 감지(`ACTIVITY_GRACE=30 ACTIVITY_EXTEND_BY=120 ACTIVITY_EXTEND_MAX=3`)로 *살아있는 한* 자동 연장. 위 값은 "최소 대기" 기준.
 
@@ -390,14 +378,14 @@ claude pane이 `[crosstalk] codex R1 done — RUN_ID=...` 메시지를 받으면
 3. 미완료면 → 그냥 종료 (마지막 ping 도착 시 다시 진입)
 4. 모두 완료면 → 각 peer의 응답 파일(`$RUN_DIR/responses/<agent>-r01.md`) 읽어 본문 정리 → **2단계 토론 라운드** 시작
 
-#### Transport 옵션 (file/screen) 사용 시
+#### Transport 대기 시간
 
-옵션 흐름은 callback 위에 얹어진다. `MAX_WAIT`은 모드 + agent별:
+옵션 흐름은 callback 위에 얹어진다. `MAX_WAIT`은 모드별:
 
-| 모드 \ agent | claude/codex 기본 | gemini |
-|---|---|---|
-| fast | 600s | 900s |
-| deep | 1800s | 2400s |
+| 모드 | MAX_WAIT |
+|---|---|
+| fast | 600s |
+| deep | 1800s |
 
 `[REVIEW_DONE]` 마커는 응답 본문 끝에서 확인.
 
@@ -425,13 +413,9 @@ PR: #${PR_NUM} <title>
 - 합의 시 [AGREE], 이견 시 [DISAGREE: 사유]
 
 ═══ Transport (변경 불가) ═══
-**AGENT가 gemini면 screen, 그 외엔 file**.
+**모든 AGENT(claude/codex/antigravity)는 file 모드.**
 
-[file — claude/codex] ${RUN_DIR}/responses/<RESP_BASENAME> 에 본문 그대로 쓰고 화면에 `DONE <MSG_ID>` 한 줄.
-[screen — gemini] 파일/툴 금지. 화면에 다음만:
-  CROSSTALK_BEGIN <MSG_ID>
-  <답변 본문>
-  CROSSTALK_END <MSG_ID>
+[file — 공통] ${RUN_DIR}/responses/<RESP_BASENAME> 에 본문 그대로 쓰고 화면에 `DONE <MSG_ID>` 한 줄.
 
   RESP_BASENAME = <agent>-r<NN>-a<N>.md
   MSG_ID        = run-<run-id>-r<NN>-<agent>-a<N>
@@ -439,7 +423,7 @@ PR: #${PR_NUM} <title>
 [1단계 리뷰 요약]
 - Claude (<verdict>): <한 줄>
 - Codex (<verdict>): <한 줄>
-- Gemini (<verdict>): <한 줄>
+- Antigravity (<verdict>): <한 줄>
 
 [직전 라운드] (2라운드부터)
 - 각 CLI: <한 줄씩>
@@ -485,7 +469,7 @@ done
 [1단계 리뷰 결과]
 🟦 Claude: <verdict> — <근거>
 🟧 Codex: <verdict> — <근거>
-🟪 Gemini: <verdict> — <근거>
+🟪 Antigravity: <verdict> — <근거>
 
 [2단계 토론 결론]
 🎯 머지 권장: Yes / No / Conditional

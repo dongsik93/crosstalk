@@ -8,7 +8,7 @@ argument-hint: [--language en|ko]
 
 두 가지 용도:
 
-1. **cmux 라벨링** (기본): `/crosstalk:analyze`, `:review`가 옆 pane의 CLI 종류를 빠르고 정확하게 식별하도록 cmux 탭에 라벨(`ct-claude`, `ct-codex`, `ct-gemini`, `ct-shell`)을 박는다.
+1. **cmux 라벨링** (기본): `/crosstalk:analyze`, `:review`가 옆 pane의 CLI 종류를 빠르고 정확하게 식별하도록 cmux 탭에 라벨(`ct-claude`, `ct-codex`, `ct-antigravity`, `ct-shell`)을 박는다.
 2. **언어 전환**: `/crosstalk:setup --language ko` 또는 `--language en` 으로 UI 언어를 즉시 토글. 인자 없이 호출하면 `AskUserQuestion`으로 묻는다. 토글 후엔 라벨링도 그대로 진행.
 
 ## 0단계: 옵션 파싱 — `--language`
@@ -89,7 +89,7 @@ case "$LANGUAGE" in en|ko) ;; *) LANGUAGE="en" ;; esac
 
 각 surface를 다음 4그룹으로:
 - **A. 라벨 있음**: 그대로 유지
-- **B. 자동 감지됨 (claude/codex/gemini)**: 자동 라벨링
+- **B. 자동 감지됨 (claude/codex/antigravity)**: 자동 라벨링
 - **C. 자동 감지 안 됨 (unknown)**: 사용자 수동 선택
 - **D. self surface**: 본인 = claude로 자동 라벨
 
@@ -106,7 +106,7 @@ Which process is running here?
 options:
   - Claude Code
   - Codex
-  - Gemini
+  - Antigravity
   - Shell / Other
   - Skip
 ```
@@ -122,7 +122,7 @@ question: <surface_ref> 의 화면 일부 미리보기:
 options:
   - Claude Code
   - Codex
-  - Gemini
+  - Antigravity
   - 일반 셸 / 기타 (토론 후보 제외)
   - 건너뛰기
 ```
@@ -130,7 +130,7 @@ options:
 답변에 따라:
 - Claude Code → `~/.claude/scripts/crosstalk_bridge.sh label <surface> claude`
 - Codex → `... label <surface> codex`
-- Gemini → `... label <surface> gemini`
+- Antigravity → `... label <surface> antigravity`
 - 일반 셸 → `... label <surface> shell`
 - 건너뛰기 → 라벨링 안 함
 
@@ -149,7 +149,7 @@ SELF=$(~/.claude/scripts/crosstalk_bridge.sh list-all | awk -F'\t' '$3=="self" {
 
 Labeled panes:
   surface:1  → claude (self)
-  surface:5  → gemini
+  surface:5  → antigravity
   surface:8  → codex
 
 You can now run:
@@ -164,7 +164,7 @@ You can now run:
 
 라벨링된 cmux pane:
   surface:1  → claude (self)
-  surface:5  → gemini
+  surface:5  → antigravity
   surface:8  → codex
 
 이제 다음 명령을 사용할 수 있습니다:
@@ -196,7 +196,7 @@ cmux pane 구성을 바꾸면 다시 /crosstalk:setup 을 실행하세요.
 
 [자동 감지]
   surface:1 → claude (self) ✓
-  surface:5 → gemini ✓
+  surface:5 → antigravity ✓
 
 [수동 확인 필요]
   surface:8 → 자동 감지 실패. 사용자에게 질문...

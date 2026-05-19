@@ -28,7 +28,7 @@ Remove the leading `cowork` word. Supported options:
 The remaining text is the assignment body. If empty, show usage:
 
 ```text
-$crosstalk cowork "claude=Repository layer, gemini=QA, goal=ship feature with tests"
+$crosstalk cowork "claude=Repository layer, antigravity=QA, goal=ship feature with tests"
 ```
 
 ## Start run
@@ -37,7 +37,7 @@ Check cmux and peers first. Then:
 
 ```bash
 PEERS_RAW=$(~/.claude/scripts/crosstalk_bridge.sh list-peers)
-PEERS=$(printf '%s\n' "$PEERS_RAW" | awk -F'\t' '$2 ~ /^(claude|codex|gemini)$/ {print $1"|"$2}')
+PEERS=$(printf '%s\n' "$PEERS_RAW" | awk -F'\t' '$2 ~ /^(claude|codex|antigravity)$/ {print $1"|"$2}')
 
 RUN_ID=$(CROSSTALK_MODERATOR_KIND=codex ~/.claude/scripts/crosstalk_bridge.sh start-run)
 RUN_DIR="/tmp/crosstalk/run-${RUN_ID}"
@@ -51,7 +51,7 @@ for p in $PEERS; do
 done
 ```
 
-Interpret the assignment body into a common `GOAL` and per-agent assignments. If explicit `claude=...`, `codex=...`, `gemini=...`, `goal=...` fields exist, preserve them. Otherwise split the work pragmatically across `AGENTS`.
+Interpret the assignment body into a common `GOAL` and per-agent assignments. If explicit `claude=...`, `codex=...`, `antigravity=...`, `goal=...` fields exist, preserve them. Otherwise split the work pragmatically across `AGENTS`.
 
 Merge `mode`, `agents`, `goal`, `assignments`, and `current_round=1` into the manifest.
 
