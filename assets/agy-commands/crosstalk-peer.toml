@@ -1,0 +1,26 @@
+description = "Crosstalk peer handler. The Crosstalk bridge invokes this as `/crosstalk-peer [crosstalk] <kind> ... RUN_ID=<id>` when Antigravity participates as a peer. Reads the referenced run file, follows it, writes the response, and pings back."
+
+prompt = """
+You are participating in a Crosstalk run as a PEER (not the caller/moderator). The bridge just delivered an incoming trigger as the arguments below. Do NOT answer the trigger text directly — it is only a signal pointing at a file on disk that contains your real instructions.
+
+Incoming trigger (arguments): {{args}}
+
+## What to do
+
+1. Parse `RUN_ID`, the trigger `kind`, the `agent` name, and (when present) the round number `NN` from the arguments. The trigger looks like one of:
+   - `[crosstalk] preamble <agent> RUN_ID=<id>`      → file: `/tmp/crosstalk/run-<id>/preambles/<agent>.md`
+   - `[crosstalk] ask <agent> RUN_ID=<id>`           → file: `/tmp/crosstalk/run-<id>/preambles/<agent>.md`
+   - `[crosstalk] round <NN> <agent> RUN_ID=<id>`    → file: `/tmp/crosstalk/run-<id>/rounds/r<NN>-<agent>.md`
+   - `[crosstalk] review-round <NN> <agent> RUN_ID=<id>` → file: `/tmp/crosstalk/run-<id>/rounds/r<NN>-<agent>.md`
+   - `[crosstalk] cowork-task <agent> RUN_ID=<id>`   → file: `/tmp/crosstalk/run-<id>/assignments/<agent>.md`
+   Your own `<agent>` name in this CLI is `antigravity`.
+
+2. Read the referenced file with the shell and treat its entire contents as your instructions for this turn:
+   !{ set -e; ARGS="{{args}}"; RUN_ID=$(printf '%s' "$ARGS" | sed -nE 's/.*RUN_ID=([A-Za-z0-9_-]+).*/\\1/p'); KIND=$(printf '%s' "$ARGS" | sed -nE 's/.*\\[crosstalk\\][[:space:]]+([a-z-]+).*/\\1/p'); NN=$(printf '%s' "$ARGS" | sed -nE 's/.*\\[crosstalk\\][[:space:]]+(round|review-round)[[:space:]]+([0-9]+).*/\\2/p'); case "$KIND" in preamble|ask) F="/tmp/crosstalk/run-$RUN_ID/preambles/antigravity.md" ;; round|review-round) F="/tmp/crosstalk/run-$RUN_ID/rounds/r${NN}-antigravity.md" ;; cowork-task) F="/tmp/crosstalk/run-$RUN_ID/assignments/antigravity.md" ;; *) F="" ;; esac; echo "=== CROSSTALK FILE: $F ==="; [ -n "$F" ] && cat "$F" 2>/dev/null || echo "ERROR: could not resolve or read run file for args: $ARGS" }
+
+3. Follow the instructions in that file exactly. They will tell you the answer format and the exact shell to write your response file (usually `cat > /tmp/crosstalk/run-<id>/responses/antigravity-r<NN>-a<N>.md <<'EOF' ... EOF`). Write the response file with a shell heredoc — do not just print the answer to the screen.
+
+4. After writing the response file, run the ping the file tells you to (typically `~/.claude/scripts/crosstalk_bridge.sh ping <RUN_ID> antigravity <round>`). For `ask` runs the file will say NOT to ping — respect that.
+
+Be concise on screen. The file is the source of truth; do not re-summarize the trigger.
+"""

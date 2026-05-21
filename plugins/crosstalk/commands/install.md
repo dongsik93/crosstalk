@@ -17,6 +17,7 @@ argument-hint: [--presets-only [--language en|ko]]
    - `~/.claude/crosstalk/{rules,personas}/*.md` (토론 룰/페르소나 빌트인)
    - `~/.claude/crosstalk/config.json` (active 프리셋 추적)
    - `~/.codex/skills/crosstalk/` (Codex caller용 `$crosstalk` skill)
+   - `~/.gemini/commands/crosstalk-peer.toml` (Antigravity peer 트리거 핸들러 `/crosstalk-peer`, agy 설치 시)
 5. 인증 안내 (gh / 각 CLI 첫 실행 시 OAuth)
 
 ## 현재 범위
@@ -314,6 +315,16 @@ if [ -d "$MARKETPLACE_ROOT/assets/codex-skills/crosstalk" ]; then
   done
 fi
 
+# Antigravity(agy) peer 슬래시 커맨드 활성화 (/crosstalk-peer)
+# agy는 claude/codex와 달리 plain 트리거를 가로채는 상주 규약이 없어서,
+# bridge가 antigravity peer에게는 트리거를 '/crosstalk-peer ...' 슬래시 호출로 감싸 보낸다.
+# 이 커맨드는 우리가 관리하는 프로토콜이므로(사용자 편집 대상 아님) 항상 최신본으로 덮어쓴다.
+# agy가 설치돼 있을 때(~/.gemini 존재)만 설치. 없으면 조용히 건너뜀.
+if [ -d "$HOME/.gemini" ] && [ -f "$MARKETPLACE_ROOT/assets/agy-commands/crosstalk-peer.toml" ]; then
+  mkdir -p ~/.gemini/commands
+  cp "$MARKETPLACE_ROOT/assets/agy-commands/crosstalk-peer.toml" ~/.gemini/commands/
+fi
+
 # 빌트인 룰/페르소나 (언어별, 이미 있으면 덮어쓰지 않음 — 사용자 편집 보존)
 for lang in en ko; do
   for f in default brainstorm debate; do
@@ -340,6 +351,7 @@ done
   ✅ ~/.claude/crosstalk/rules/{en,ko}/
   ✅ ~/.claude/crosstalk/personas/{en,ko}/
   ✅ ~/.codex/skills/crosstalk/ (Codex $crosstalk skill)
+  ✅ ~/.gemini/commands/crosstalk-peer.toml (Antigravity peer handler, agy 설치 시)
   ✅ ~/.claude/crosstalk/config.json (language + active presets)
 ```
 

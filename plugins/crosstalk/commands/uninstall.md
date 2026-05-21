@@ -12,6 +12,7 @@ argument-hint: (인자 없음)
 - `~/.claude/scripts/crosstalk_bridge.sh`
 - `~/.claude/commands/crosstalk.md` (단독 명령)
 - (v0.5 이후) `~/.codex/skills/crosstalk/`
+- (v0.8 이후) `~/.gemini/commands/crosstalk-peer.toml` (Antigravity peer 핸들러)
 
 **제거 안 함**:
 - 플러그인 자체 (마켓에서 install된 것) → `/plugin uninstall crosstalk` 사용
@@ -30,6 +31,8 @@ case "$LANGUAGE" in en|ko) ;; *) LANGUAGE="en" ;; esac
 ITEMS=()
 [ -f ~/.claude/scripts/crosstalk_bridge.sh ] && ITEMS+=("~/.claude/scripts/crosstalk_bridge.sh")
 [ -f ~/.claude/commands/crosstalk.md ] && ITEMS+=("~/.claude/commands/crosstalk.md")
+[ -d ~/.codex/skills/crosstalk ] && ITEMS+=("~/.codex/skills/crosstalk/")
+[ -f ~/.gemini/commands/crosstalk-peer.toml ] && ITEMS+=("~/.gemini/commands/crosstalk-peer.toml")
 
 if [ ${#ITEMS[@]} -eq 0 ]; then
   [ "$LANGUAGE" = "ko" ] && echo "ℹ️ 제거할 Crosstalk 컴포넌트가 없습니다." || echo "ℹ️ No Crosstalk components found."
@@ -42,6 +45,8 @@ fi
 🗑️  다음 항목을 제거합니다:
   - ~/.claude/scripts/crosstalk_bridge.sh
   - ~/.claude/commands/crosstalk.md
+  - ~/.codex/skills/crosstalk/            (있으면)
+  - ~/.gemini/commands/crosstalk-peer.toml (있으면)
 ```
 
 ## 2단계: 사용자 확인
@@ -68,6 +73,8 @@ options:
 ```bash
 rm -f ~/.claude/scripts/crosstalk_bridge.sh
 rm -f ~/.claude/commands/crosstalk.md
+rm -rf ~/.codex/skills/crosstalk
+rm -f ~/.gemini/commands/crosstalk-peer.toml
 ```
 
 ## 4단계: 결과 안내

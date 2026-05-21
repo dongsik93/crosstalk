@@ -288,7 +288,25 @@ case "$CMD" in
       echo "Next: write the full Crosstalk message to disk before calling send-via-file." >&2
       exit 1
     fi
-    "$0" send "$SURFACE" "$TRIGGER_MSG"
+    # Antigravity(agy)는 claude/codex처럼 plain 트리거를 가로채는 상주 규약이 없다.
+    # 대신 `/crosstalk-peer` 슬래시 커맨드(~/.gemini/commands/crosstalk-peer.toml)가
+    # 트리거를 인자로 받아 run 파일을 읽고 처리한다. → 대상이 antigravity면 트리거를 슬래시 호출로 감싼다.
+    # 또한 agy는 busy 상태에서 입력을 받으면 큐에 쌓으므로(전송 안 됨), idle 될 때까지 잠깐 대기한다.
+    KIND=$("$0" detect "$SURFACE")
+    if [ "$KIND" = "antigravity" ]; then
+      # idle 대기: 푸터에 '? for shortcuts' 가 보이면 입력 가능 상태.
+      AGY_IDLE_WAIT="${AGY_IDLE_WAIT:-20}"
+      WAITED=0
+      while [ "$WAITED" -lt "$AGY_IDLE_WAIT" ]; do
+        SCREEN=$(cmux read-screen --surface "$SURFACE" --lines 80 2>/dev/null | tail -5)
+        echo "$SCREEN" | grep -q '? for shortcuts' && break
+        sleep 1
+        WAITED=$((WAITED + 1))
+      done
+      "$0" send "$SURFACE" "/crosstalk-peer $TRIGGER_MSG"
+    else
+      "$0" send "$SURFACE" "$TRIGGER_MSG"
+    fi
     ;;
 
   capture)

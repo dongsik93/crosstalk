@@ -1,6 +1,6 @@
 {
   "name": "crosstalk",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Multi-agent analysis + ask + co-work powered by cmux split panes, with file-based messaging and experimental Codex caller support via $crosstalk.",
   "author": {
     "name": "dongsik93"
