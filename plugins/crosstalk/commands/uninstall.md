@@ -10,6 +10,7 @@ argument-hint: (인자 없음)
 
 **제거 대상**:
 - `~/.claude/scripts/crosstalk_bridge.sh`
+- `~/.claude/scripts/crosstalk_ghostty.sh`
 - `~/.claude/commands/crosstalk.md` (단독 명령)
 - (v0.5 이후) `~/.codex/skills/crosstalk/`
 - (v0.8 이후) `~/.gemini/commands/crosstalk-peer.toml` (Antigravity peer 핸들러)
@@ -30,6 +31,7 @@ case "$LANGUAGE" in en|ko) ;; *) LANGUAGE="en" ;; esac
 
 ITEMS=()
 [ -f ~/.claude/scripts/crosstalk_bridge.sh ] && ITEMS+=("~/.claude/scripts/crosstalk_bridge.sh")
+[ -f ~/.claude/scripts/crosstalk_ghostty.sh ] && ITEMS+=("~/.claude/scripts/crosstalk_ghostty.sh")
 [ -f ~/.claude/commands/crosstalk.md ] && ITEMS+=("~/.claude/commands/crosstalk.md")
 [ -d ~/.codex/skills/crosstalk ] && ITEMS+=("~/.codex/skills/crosstalk/")
 [ -f ~/.gemini/commands/crosstalk-peer.toml ] && ITEMS+=("~/.gemini/commands/crosstalk-peer.toml")
@@ -71,7 +73,7 @@ options:
 ## 3단계: 제거 실행
 
 ```bash
-rm -f ~/.claude/scripts/crosstalk_bridge.sh
+rm -f ~/.claude/scripts/crosstalk_bridge.sh ~/.claude/scripts/crosstalk_ghostty.sh
 rm -f ~/.claude/commands/crosstalk.md
 rm -rf ~/.codex/skills/crosstalk
 rm -f ~/.gemini/commands/crosstalk-peer.toml

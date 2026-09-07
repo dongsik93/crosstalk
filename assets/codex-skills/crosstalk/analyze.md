@@ -50,7 +50,7 @@ $crosstalk analyze [--rules <name>] [--persona <name>] <topic>
 
 ## Preconditions
 
-Run the checks from `readiness.md`. If outside cmux, save `TOPIC` with `pending-save` and stop. If no peers are available, ask the user to launch or label panes first.
+Run `readiness.md`, including automatic `ensure-peer codex claude` on Ghostty. Continue only when it succeeds. Preserve the topic and report the bridge error if preparation fails.
 
 ## Load presets
 
@@ -97,6 +97,16 @@ jq --arg mode analyze \
    --argjson agents "$(printf '%s\n' "${AGENTS[@]}" | jq -R . | jq -s .)" \
    '. + {mode: $mode, agents: $agents, current_round: $round}' \
    "$MANIFEST" > "$TMP_MANIFEST" && mv "$TMP_MANIFEST" "$MANIFEST"
+```
+
+Persist the peer mapping so callbacks can route later rounds:
+
+```bash
+for entry in $PEERS; do
+  TMP_MANIFEST=$(mktemp)
+  jq --arg kind "${entry#*|}" --arg surface "${entry%|*}" \
+    '.peers[$kind] = $surface' "$MANIFEST" > "$TMP_MANIFEST" && mv "$TMP_MANIFEST" "$MANIFEST"
+done
 ```
 
 ## Moderator's own response

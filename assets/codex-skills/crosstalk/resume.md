@@ -1,6 +1,6 @@
 # $crosstalk resume
 
-Resume a topic preserved when `$crosstalk <topic>` was called outside cmux.
+Resume a topic preserved when `$crosstalk <topic>` was called outside a supported terminal.
 
 ```bash
 TOPIC=$(~/.claude/scripts/crosstalk_bridge.sh pending-load 2>/dev/null)

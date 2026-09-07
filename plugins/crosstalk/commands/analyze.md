@@ -27,8 +27,8 @@ argument-hint: <분석 주제 / 자료 본문>
 
 ## 전제 조건
 
-- cmux 환경에서 실행 중
-- 본인 외 cmux split 안에 다른 AI CLI(Codex/Antigravity) 1개 이상 있음 (없으면 `/crosstalk:launch` 안내 후 종료)
+- Ghostty 1.3+ (macOS) 또는 cmux 환경에서 실행 중
+- 본인 외 다른 AI CLI pane이 필요. Ghostty에서는 아래 단계가 자동으로 Codex를 준비한다.
 - bridge 스크립트 설치 완료
 
 ## 트리거 수신 규약 (v0.6.0+)
@@ -85,6 +85,18 @@ PERSONA_FILE="$HOME/.claude/crosstalk/personas/${LANGUAGE}/${PERSONA_NAME}.md"
 > 룰/페르소나 본문은 *압축/요약하지 마라*. 사용자가 파일을 수정한 의도를 보존해야 한다.
 
 ## 1단계: peer 탐색
+
+Ghostty에서는 먼저 실행하고 성공한 경우에만 계속한다:
+
+```bash
+BRIDGE="$HOME/.claude/scripts/crosstalk_bridge.sh"
+if [ "$("$BRIDGE" backend)" = ghostty ]; then
+  "$BRIDGE" ensure-peer claude codex || exit 1
+fi
+```
+
+Ghostty는 화면 캡처 없이 파일 응답과 ping을 사용한다. 이후의 cmux 언급은 이 bridge를 통한 terminal 전송을 뜻한다.
+
 
 ```bash
 # 자기 자신 제외한 cmux pane 목록 — <surface>\t<kind> 형식

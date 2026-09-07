@@ -1,5 +1,5 @@
 ---
-description: Show current Crosstalk status, language, rules/personas, and cmux pane labels.
+description: Show current Crosstalk status, language, rules/personas, and terminal pane labels.
 allowed-tools: Bash, Read
 argument-hint: (인자 없음)
 ---
@@ -35,10 +35,10 @@ AVAILABLE_PERSONAS=$(ls "$PERSONAS_DIR"/*.md 2>/dev/null | xargs -n1 basename | 
 
 각 룰/페르소나 본문에서 첫 번째 `## 1.` 또는 첫 단락을 한 줄 요약으로 추출 (선택 사항).
 
-## 2단계: cmux 상태 (cmux 안에서 호출된 경우만)
+## 2단계: terminal 상태 (Ghostty 또는 cmux)
 
 ```bash
-if cmux ping >/dev/null 2>&1; then
+if ~/.claude/scripts/crosstalk_bridge.sh self >/dev/null 2>&1; then
   PEERS=$(~/.claude/scripts/crosstalk_bridge.sh list-peers 2>/dev/null)
 fi
 ```
@@ -68,10 +68,10 @@ Crosstalk status
   - critic-builder
   - triple-perspective
 
-[cmux panes]
+[terminal panes]
   surface:1 → claude (self)
   surface:4 → codex
-  or "not running inside cmux"
+  or "caller terminal not identified"
 
 [Start]
   /crosstalk <topic>
@@ -103,10 +103,10 @@ Crosstalk status
   - critic-builder       — 비판가 vs 빌더
   - triple-perspective   — 보수/혁신/실용 (3분할 전용)
 
-[cmux pane 상태]              ← cmux 안에서 호출 시만
+[terminal pane 상태]              ← terminal 식별 가능 시
   surface:1 → claude (self)
   surface:4 → codex
-  (또는 "cmux 외부에서 호출됨" 안내)
+  (또는 "terminal을 식별할 수 없음" 안내)
 
 [관리 명령]
   /crosstalk:rules    — 룰 전환/생성/편집
@@ -126,4 +126,4 @@ cmux 명령 raw 출력은 노출 X. 깔끔한 요약만.
 
 - 읽기 전용 — 이 명령은 설정을 변경하지 않음
 - 언어별 프리셋 디렉토리(`rules/${LANGUAGE}`, `personas/${LANGUAGE}`)를 기준으로 표시
-- cmux 외부 호출 시 cmux pane 상태 섹션은 *외부에서 호출됨*으로 표시
+- terminal 식별 불가 시 terminal pane 상태 섹션은 *외부에서 호출됨*으로 표시

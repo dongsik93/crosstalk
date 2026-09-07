@@ -1,6 +1,6 @@
 ---
 name: crosstalk
-description: Run Crosstalk multi-agent analysis, cowork, status, resume, and callback workflows through cmux panes from Codex.
+description: Run Crosstalk multi-agent analysis, cowork, status, resume, and callback workflows through Ghostty or cmux panes from Codex.
 ---
 
 # Crosstalk for Codex
@@ -9,6 +9,7 @@ Use this skill when the user invokes `$crosstalk` or asks Codex to run Crosstalk
 
 This is a dispatcher. Do not inline every workflow from memory. Read exactly one flow file from this skill directory before acting:
 
+- `launch [claude]`: read `readiness.md` and run `bridge ensure-peer codex claude`.
 - No arguments: read `readiness.md`.
 - Plain topic: read `analyze.md`.
 - `analyze ...`: read `analyze.md`.
@@ -32,6 +33,6 @@ When starting a run from Codex, call:
 CROSSTALK_MODERATOR_KIND=codex ~/.claude/scripts/crosstalk_bridge.sh start-run
 ```
 
-The bridge also detects the current cmux surface and writes `moderator_surface` and `moderator_kind` to the manifest. If cmux or the bridge is missing, follow `readiness.md` and preserve the topic when needed.
+The bridge also detects the current terminal surface and writes `moderator_surface` and `moderator_kind` to the manifest. If the terminal cannot be identified or the bridge is missing, follow `readiness.md` and preserve the topic when needed.
 
 When handling an incoming `[crosstalk] ...` trigger as a peer, do not answer the trigger directly. Parse `RUN_ID` and `agent`, read the referenced file under `/tmp/crosstalk/run-<RUN_ID>/`, follow its instructions, write the required response file, then call `~/.claude/scripts/crosstalk_bridge.sh ping`.

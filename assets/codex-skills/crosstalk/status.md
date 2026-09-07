@@ -7,7 +7,7 @@ Collect:
 - `~/.claude/crosstalk/config.json`
 - active language/rules/persona
 - available rules/personas for that language
-- cmux panes, when inside cmux
+- Ghostty or cmux panes, when the caller can be identified
 - whether `~/.claude/scripts/crosstalk_bridge.sh` exists
 - whether `~/.codex/skills/crosstalk/SKILL.md` exists
 
@@ -17,7 +17,7 @@ Use:
 ~/.claude/scripts/crosstalk_bridge.sh list-all
 ```
 
-when cmux is available.
+when the caller terminal can be identified.
 
 Output a compact status block and include both start commands:
 

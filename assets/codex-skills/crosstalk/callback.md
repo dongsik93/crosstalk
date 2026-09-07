@@ -75,6 +75,12 @@ Increment `current_round` in the manifest and write each participant's divergenc
 /tmp/crosstalk/run-${RUN_ID}/rounds/r<NN>-<agent>.md
 ```
 
+Resolve each peer's terminal from the original run (never from current focus):
+
+```bash
+PEER_SURFACE=$(jq -er --arg agent "$AGENT" '.peers[$agent]' "$MANIFEST")
+```
+
 Then send only the short trigger:
 
 ```bash

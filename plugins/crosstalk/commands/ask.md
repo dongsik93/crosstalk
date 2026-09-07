@@ -18,7 +18,7 @@ argument-hint: <질문>
 
 ## 전제 조건
 
-- cmux 환경, split 안에 다른 AI CLI(Codex/Antigravity) 1개 이상
+- Ghostty 또는 cmux 환경, split 안에 다른 AI CLI 1개 이상
 - bridge 설치 완료
 
 ## 트리거 수신 규약 (peer가 받는 메시지)
@@ -45,6 +45,18 @@ fi
 ```
 
 ## 1단계: peer 탐색
+
+Ghostty에서는 먼저 실행하고 성공한 경우에만 계속한다:
+
+```bash
+BRIDGE="$HOME/.claude/scripts/crosstalk_bridge.sh"
+if [ "$("$BRIDGE" backend)" = ghostty ]; then
+  "$BRIDGE" ensure-peer claude codex || exit 1
+fi
+```
+
+Ghostty는 화면 캡처 없이 파일 응답과 ping을 사용한다. 이후의 cmux 언급은 이 bridge를 통한 terminal 전송을 뜻한다.
+
 
 ```bash
 PEERS_RAW=$(~/.claude/scripts/crosstalk_bridge.sh list-peers)

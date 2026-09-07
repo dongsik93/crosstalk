@@ -1,56 +1,32 @@
 # $crosstalk readiness
 
-Run this when `$crosstalk` has no arguments, or before starting a topic.
-
-## Checks
-
-Use shell commands and keep user output concise.
+Use the installed bridge, never a direct cmux check:
 
 ```bash
 BRIDGE="$HOME/.claude/scripts/crosstalk_bridge.sh"
-[ -x "$BRIDGE" ] && INSTALLED="OK" || INSTALLED="missing"
-
-if [ "$INSTALLED" = "OK" ] && cmux identify >/dev/null 2>&1; then
-  CMUX="inside"
-else
-  CMUX="outside"
-fi
-
-if [ "$CMUX" = "inside" ]; then
-  PEERS=$("$BRIDGE" list-peers 2>/dev/null \
-    | awk -F'\t' '$2 ~ /^(claude|codex|antigravity)$/' \
-    | wc -l | tr -d ' ')
-else
-  PEERS="?"
-fi
+[ -x "$BRIDGE" ] || { echo 'Crosstalk bridge missing: run /crosstalk:install'; exit 1; }
+BACKEND=$("$BRIDGE" backend)
+SELF=$("$BRIDGE" self)
+"$BRIDGE" label "$SELF" codex
+"$BRIDGE" list-peers
 ```
 
-## Output
+For an empty invocation, show backend, caller ID, and labelled peers. Do not launch an AI just to show status.
 
-Show:
-
-```text
-Crosstalk — readiness
-
-  installed:  <OK|missing>
-  cmux:       <inside|outside>
-  peers:      <N|?> detected
-
-Next:
-  <single next action>
-```
-
-Next action rules:
-
-- `installed=missing`: ask the user to run `/crosstalk:install` once in Claude Code. This installs both Claude commands and the Codex `$crosstalk` skill.
-- `cmux=outside`: tell the user to open or enter a cmux workspace. If a topic was provided, save it first with `pending-save`.
-- `cmux=inside, peers=0`: tell the user to run `/crosstalk:launch` in Claude Code or open another AI CLI pane and label it with `/crosstalk:setup`.
-- `cmux=inside, peers>=1`: say `$crosstalk <topic>` is ready.
-
-If a topic was provided while outside cmux:
+For a topic on Ghostty, automatically prepare the requested Claude peer:
 
 ```bash
-"$BRIDGE" pending-save "$TOPIC"
+PEER=$("$BRIDGE" ensure-peer codex claude)
 ```
 
-Then say the topic was preserved and can be resumed with `$crosstalk resume` from inside cmux.
+This reuses one labelled Claude peer in the caller's tab or splits right and launches Claude in the same directory. It waits for a real startup acknowledgement. On timeout, stop and report the existing pane's login/trust prompt; never launch another copy or bypass permissions. Then continue the requested flow automatically.
+
+On cmux, keep the existing launch/setup flow if no peers exist.
+
+If `self` fails, preserve a supplied topic with `pending-save` and show the bridge error. Do not guess the focused pane. The initial Ghostty binding requires a unique working directory across Ghostty terminals; if ambiguous, use `CROSSTALK_SURFACE_ID=ghostty:<UUID>` consistently for bridge calls. IDs are available through:
+
+```bash
+osascript -e 'tell application "Ghostty" to get {id, name, working directory} of every terminal'
+```
+
+Ghostty supports Claude/Codex with file responses and ping callbacks. Screen capture, UI footer detection, and screen transport are unavailable. Do not call `wait-ready` or `wait-turn` on Ghostty; `ensure-peer` handles startup.

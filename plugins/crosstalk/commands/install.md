@@ -34,7 +34,7 @@ argument-hint: [--presets-only [--language en|ko]]
 
 ## 0단계: 플랫폼 검증 (게이트)
 
-Crosstalk은 cmux에 의존하므로 macOS에서만 동작한다. 다른 플랫폼이면 즉시 명확히 차단:
+Crosstalk의 Ghostty/ cmux 백엔드는 현재 macOS에서 동작한다. 다른 플랫폼이면 즉시 명확히 차단:
 
 ```bash
 PLATFORM=$(uname -s 2>/dev/null || echo "unknown")
@@ -107,9 +107,8 @@ fi
 node --version || echo "NODE_MISSING"
 npm --version || echo "NPM_MISSING"
 
-# cmux
-which cmux || echo "CMUX_MISSING"
-cmux version 2>/dev/null || echo ""
+# Ghostty 1.3+ or cmux
+/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' /Applications/Ghostty.app/Contents/Info.plist 2>/dev/null || cmux version 2>/dev/null || echo "TERMINAL_MISSING"
 
 # gh (review 명령에 필요)
 which gh || echo "GH_MISSING"
@@ -143,7 +142,7 @@ which agy || echo "AGY_MISSING"              # antigravity — standalone 바이
 
 **필수 도구 누락 처리**:
 - Node.js / npm 누락 → 자동 설치 불가, 안내만 (Node 공식 사이트 권장)
-- cmux 누락 → `brew install --cask cmux` 안내, 설치 진행은 가능 (사용 시 cmux 필요)
+- Ghostty 1.3+ 또는 cmux 중 하나 필요. Ghostty가 있으면 cmux 설치를 요구하지 않는다.
 - gh 누락 → `brew install gh && gh auth login` 안내, install 자체는 진행
 - jq 누락 → `brew install jq` 안내. 룰/페르소나 config 파싱에 필수이므로 install 차단 + 사용자에게 설치 권장 후 재실행 안내
 
@@ -293,7 +292,7 @@ mkdir -p ~/.claude/crosstalk/personas/en ~/.claude/crosstalk/personas/ko
 mkdir -p ~/.codex/skills/crosstalk
 
 # bridge 스크립트
-cp "$MARKETPLACE_ROOT/assets/scripts/crosstalk_bridge.sh" ~/.claude/scripts/
+cp "$MARKETPLACE_ROOT/assets/scripts/crosstalk_bridge.sh" "$MARKETPLACE_ROOT/assets/scripts/crosstalk_ghostty.sh" ~/.claude/scripts/
 chmod +x ~/.claude/scripts/crosstalk_bridge.sh
 
 # VERSION (bridge가 manifest 작성 시 읽음)
@@ -303,13 +302,14 @@ chmod +x ~/.claude/scripts/crosstalk_bridge.sh
 cp "$MARKETPLACE_ROOT/assets/user-commands/crosstalk.md" ~/.claude/commands/
 
 # Codex caller skill 활성화 ($crosstalk)
-# 사용자 편집 보존: 이미 있는 파일은 덮어쓰지 않고, 새 파일만 보충.
+# 기존 스킬 파일은 변경 시 .bak으로 보존한 뒤 배포본으로 갱신 (새 백엔드 readiness도 갱신해야 함).
 if [ -d "$MARKETPLACE_ROOT/assets/codex-skills/crosstalk" ]; then
   (cd "$MARKETPLACE_ROOT/assets/codex-skills/crosstalk" && find . -type f) | while read -r rel; do
     src="$MARKETPLACE_ROOT/assets/codex-skills/crosstalk/$rel"
     dst="$HOME/.codex/skills/crosstalk/$rel"
     mkdir -p "$(dirname "$dst")"
-    if [ ! -f "$dst" ]; then
+    if ! cmp -s "$src" "$dst"; then
+      [ ! -f "$dst" ] || cp "$dst" "$dst.bak.$(date +%s)"
       cp "$src" "$dst"
     fi
   done

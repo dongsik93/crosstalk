@@ -66,6 +66,10 @@ case "$LANGUAGE" in en|ko) ;; *) LANGUAGE="en" ;; esac
 
 해결: cmux 탭 이름에 `ct-<kind>` 라벨을 박고, detect는 라벨 우선 → 폴백으로 푸터 매칭.
 
+## Ghostty
+
+Use `bridge list-all` and `bridge label` with `ghostty:<UUID>` IDs. Labels are stored separately and do not replace terminal titles. Ghostty has no screen preview API: for an unknown pane show its ID and ask for Claude, Codex, shell, or skip. Do not call capture/read-screen or offer Antigravity on this backend. Newly launched peers are labelled automatically by `bridge ensure-peer`.
+
 ## 동작
 
 1. 모든 cmux pane 스캔

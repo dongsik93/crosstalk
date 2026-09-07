@@ -1,14 +1,25 @@
 ---
-description: Launch or prepare a cmux workspace for Crosstalk. User-facing prompts support en/ko.
+description: Launch or prepare a Ghostty tab or cmux workspace for Crosstalk. User-facing prompts support en/ko.
 allowed-tools: Bash, AskUserQuestion
 argument-hint: (인자 없음)
 ---
 
-# Crosstalk Launch — cmux 환경 한방 셋업
+# Crosstalk Launch — 터미널 셋업
 
-이 명령은 **호출 위치에 따라 다르게 동작**한다:
+## Ghostty (run this check before the cmux-only steps below)
 
-- **cmux 외부에서 호출** (Ghostty, Terminal.app, Warp 등): cmux 앱만 띄우고 안내 (cmux 안에서 다시 `/crosstalk:launch` 실행하라)
+```bash
+BRIDGE="$HOME/.claude/scripts/crosstalk_bridge.sh"
+BACKEND=$("$BRIDGE" backend)
+```
+
+If `BACKEND=ghostty`, run `"$BRIDGE" ensure-peer claude codex` and finish. From a Codex caller use `ensure-peer codex claude`. This creates a native right split in the current directory, or reuses the labelled peer in this tab. It waits for the peer's startup acknowledgement; on timeout, report the existing pane's login/trust prompt and do not create a duplicate. Do not execute any cmux steps below on Ghostty.
+
+## cmux backend only
+
+아래는 cmux 백엔드에서만 실행한다:
+
+- **cmux 외부에서 호출** (Terminal.app, Warp 등): cmux 앱만 띄우고 안내 (cmux 안에서 다시 `/crosstalk:launch` 실행하라)
 - **cmux 안에서 호출**: 현재 워크스페이스에 split 추가 + AI CLI 자동 시작 + 라벨링
 
 이유: cmux의 분할/통신 API는 cmux 안에서 실행되는 셸에서만 접근 가능 (`cmux ping`이 외부에선 broken pipe 반환).

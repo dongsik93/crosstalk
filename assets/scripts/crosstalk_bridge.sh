@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# crosstalk_bridge.sh — cmux 기반 AI 토론 헬퍼
+# crosstalk_bridge.sh — Ghostty/cmux AI 토론 헬퍼
 #
 # 명령:
 #   crosstalk_bridge.sh peer                       → 상대 surface ID 자동 감지 (본인 제외, 첫 번째)
@@ -66,8 +66,61 @@
 
 set -euo pipefail
 
+# Target IDs carry their backend so callbacks work even from a different environment.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/crosstalk_ghostty.sh"
+
+terminal_backend() {
+  case "${CROSSTALK_BACKEND:-}" in
+    ghostty|cmux) echo "$CROSSTALK_BACKEND" ;;
+    "")
+      if [[ "${CROSSTALK_SURFACE_ID:-}" = ghostty:* ]]; then echo ghostty
+      elif [ -n "${CMUX_SURFACE_ID:-}" ] || [ -n "${CMUX_WORKSPACE_ID:-}" ]; then echo cmux
+      elif [ "${TERM_PROGRAM:-}" = ghostty ]; then echo ghostty
+      else echo cmux; fi ;;
+    *) echo "ERROR: CROSSTALK_BACKEND must be ghostty or cmux" >&2; return 1 ;;
+  esac
+}
+
+terminal_surfaces() {
+  local self="$1" pane
+  if [[ "$self" = ghostty:* ]]; then
+    ghostty_rpc list "$(ghostty_id "$self")" | sed '/^$/d; s/^/ghostty:/'
+  else
+    for pane in $(cmux list-panes | awk '/pane:/ {gsub("[*]", ""); print $1}'); do
+      cmux list-pane-surfaces --pane "$pane" | awk '/surface:/ {gsub("[*]", ""); print $1}'
+    done
+  fi
+}
+
+terminal_text() {
+  local id
+  if [[ "$1" = ghostty:* ]]; then
+    id=$(ghostty_id "$1") || return
+    ghostty_rpc text "$id" "$2"
+  else cmux send --surface "$1" "$2"; fi
+}
+
+terminal_key() {
+  local id
+  if [[ "$1" = ghostty:* ]]; then
+    id=$(ghostty_id "$1") || return
+    ghostty_rpc key "$id" "$2"
+  else cmux send-key --surface "$1" "$2"; fi
+}
+
+terminal_screen() {
+  if [[ "$1" = ghostty:* ]]; then
+    echo "ERROR: Ghostty 1.3 has no screen-read API; use file responses and ping." >&2
+    return 1
+  fi
+  cmux read-screen --surface "$1" ${3:+--scrollback} --lines "${2:-200}"
+}
+
 # 본인 surface_ref 추출 헬퍼 (caller 블록 내부에서)
 self_surface() {
+  local backend
+  backend=$(terminal_backend) || return
+  if [ "$backend" = ghostty ]; then ghostty_self; return; fi
   cmux identify \
     | awk '/"caller"[[:space:]]*:/{flag=1} flag && /"surface_ref"/{print; exit}' \
     | sed 's/.*: "//; s/".*//'
@@ -156,22 +209,58 @@ CMD="${1:-}"
 shift || true
 
 case "$CMD" in
-  peer)
+  capture|lines|prompt-count|wait|wait-ready|wait-turn)
+    if [[ "${1:-}" = ghostty:* ]]; then
+      echo "ERROR: Ghostty has no screen-read API. Use ensure-peer for startup, response files and ping/wait-ping for completion." >&2
+      exit 1
+    fi ;;
+esac
+
+case "$CMD" in
+  backend)
+    terminal_backend
+    ;;
+
+  self)
+    self_surface
+    ;;
+
+  launch)
+    [ "$(terminal_backend)" = ghostty ] || { echo "Use /crosstalk:launch for cmux." >&2; exit 1; }
+    ghostty_launch "${1:?peer kind required (claude|codex)}"
+    ;;
+
+  ensure-peer)
+    CALLER="${1:?caller kind required}"
+    case "$CALLER" in
+      codex) WANT="${2:-claude}" ;;
+      claude) WANT="${2:-codex}" ;;
+      *) echo "ERROR: caller must be claude or codex" >&2; exit 1 ;;
+    esac
+    case "$WANT" in claude|codex) ;; *) echo "ERROR: peer must be claude or codex" >&2; exit 1 ;; esac
+    [ "$CALLER" != "$WANT" ] || { echo "ERROR: choose the other CLI kind" >&2; exit 1; }
     SELF=$(self_surface)
-    PEER=""
-    for PANE in $(cmux list-panes 2>/dev/null | awk '/pane:/ {gsub("[*]",""); print $1}'); do
-      for S in $(cmux list-pane-surfaces --pane "$PANE" 2>/dev/null | awk '/surface:/ {gsub("[*]",""); print $1}'); do
-        if [ "$S" != "$SELF" ]; then
-          PEER="$S"
-          break 2
-        fi
-      done
-    done
-    if [ -z "$PEER" ]; then
-      echo "ERROR: peer surface not found (split이 안 되어있거나 cmux 안에서 실행되지 않음)" >&2
-      echo "Next: cmux 워크스페이스 안에서 '/crosstalk:launch' 실행하거나, '/crosstalk <주제>'로 자동 셋업." >&2
+    "$0" label "$SELF" "$CALLER" >/dev/null
+    PEERS=$("$0" list-peers)
+    MATCHES=$(printf '%s\n' "$PEERS" | awk -F '\t' -v kind="$WANT" '$2 == kind {print $1}')
+    COUNT=$(printf '%s\n' "$MATCHES" | awk 'NF {n++} END {print n+0}')
+    [ "$COUNT" -le 1 ] || { echo "ERROR: multiple $WANT peers in this tab; select one explicitly" >&2; exit 1; }
+    if [ "$COUNT" -eq 1 ]; then
+      if [[ "$MATCHES" = ghostty:* ]]; then ghostty_wait_ready "$MATCHES"; fi
+      echo "$MATCHES"
+    elif [[ "$SELF" = ghostty:* ]]; then
+      ghostty_launch "$WANT"
+    else
+      echo "ERROR: no $WANT peer; run /crosstalk:launch in cmux" >&2
       exit 1
     fi
+    ;;
+
+  peer)
+    SELF=$(self_surface)
+    SURFACES=$(terminal_surfaces "$SELF")
+    PEER=$(printf '%s\n' "$SURFACES" | awk -v self="$SELF" '$0 != self {print; exit}')
+    [ -n "$PEER" ] || { echo "ERROR: no peer in caller tab/workspace" >&2; exit 1; }
     echo "$PEER"
     ;;
 
@@ -189,8 +278,10 @@ case "$CMD" in
       exit 0
     fi
 
+    if [[ "$SURFACE" = ghostty:* ]]; then echo unknown; exit 0; fi
+
     # 2순위: 푸터 매칭 (헬퍼 사용)
-    FOOTER=$(cmux read-screen --surface "$SURFACE" --lines 80 2>/dev/null | tail -20)
+    FOOTER=$(terminal_screen "$SURFACE" 80 2>/dev/null | tail -20)
     detect_kind_from_screen "$FOOTER"
     ;;
 
@@ -203,7 +294,12 @@ case "$CMD" in
       claude|codex|antigravity|shell) ;;
       *) echo "ERROR: invalid kind '$KIND' (use claude/codex/antigravity/shell)" >&2; exit 1 ;;
     esac
-    cmux rename-tab --surface "$SURFACE" "ct-${KIND}" >/dev/null
+    if [[ "$SURFACE" = ghostty:* ]]; then
+      case "$KIND" in claude|codex|shell) ;; *) echo "ERROR: Ghostty supports Claude/Codex only" >&2; exit 1 ;; esac
+      ghostty_label "$SURFACE" "$KIND"
+    else
+      cmux rename-tab --surface "$SURFACE" "ct-${KIND}" >/dev/null
+    fi
     echo "OK: $SURFACE → ct-${KIND}"
     ;;
 
@@ -212,6 +308,7 @@ case "$CMD" in
     # list-pane-surfaces 출력 형식: "* surface:N  <label>  [selected]"
     # 라벨에 "ct-" 접두사 있을 때만 그 뒤 부분 추출, 없으면 빈 줄
     SURFACE="${1:?surface required}"
+    if [[ "$SURFACE" = ghostty:* ]]; then ghostty_get_label "$SURFACE"; exit; fi
     # 모든 pane을 돌며 해당 surface 행 찾기 (작은 환경 가정 — pane 몇 개 안 됨)
     LABEL=""
     for PANE in $(cmux list-panes 2>/dev/null | awk '/pane:/ {gsub("[*]",""); print $1}'); do
@@ -232,39 +329,25 @@ case "$CMD" in
     echo "$LABEL"
     ;;
 
-  list-all)
-    # 본인 포함 모든 surface 나열, 본인은 마지막 컬럼에 self 마킹
-    # 출력 형식: <surface>\t<kind>\t<self|peer>
+  list-all|list-peers)
     SELF=$(self_surface)
-    for PANE in $(cmux list-panes 2>/dev/null | awk '/pane:/ {gsub("[*]",""); print $1}'); do
-      for S in $(cmux list-pane-surfaces --pane "$PANE" 2>/dev/null | awk '/surface:/ {gsub("[*]",""); print $1}'); do
-        KIND=$("$0" detect "$S")
-        ROLE="peer"
-        [ "$S" = "$SELF" ] && ROLE="self"
-        printf "%s\t%s\t%s\n" "$S" "$KIND" "$ROLE"
-      done
-    done
-    ;;
-
-  list-peers)
-    # 본인 제외한 모든 surface + 감지된 CLI 종류
-    # 출력 형식: <surface_ref>\t<cli_name>\n
-    SELF=$(self_surface)
-    for PANE in $(cmux list-panes 2>/dev/null | awk '/pane:/ {gsub("[*]",""); print $1}'); do
-      for S in $(cmux list-pane-surfaces --pane "$PANE" 2>/dev/null | awk '/surface:/ {gsub("[*]",""); print $1}'); do
-        if [ "$S" != "$SELF" ]; then
-          KIND=$("$0" detect "$S")
-          printf "%s\t%s\n" "$S" "$KIND"
-        fi
-      done
-    done
+    SURFACES=$(terminal_surfaces "$SELF")
+    while IFS= read -r S; do
+      [ -n "$S" ] || continue
+      [ "$CMD" = list-peers ] && [ "$S" = "$SELF" ] && continue
+      KIND=$("$0" detect "$S")
+      ROLE=peer
+      [ "$S" = "$SELF" ] && ROLE=self
+      if [ "$CMD" = list-all ]; then printf '%s\t%s\t%s\n' "$S" "$KIND" "$ROLE"
+      else printf '%s\t%s\n' "$S" "$KIND"; fi
+    done <<< "$SURFACES"
     ;;
 
   send)
     SURFACE="${1:?surface required}"
     TEXT="${2:?text required}"
-    cmux send --surface "$SURFACE" "$TEXT" >/dev/null
-    cmux send-key --surface "$SURFACE" enter >/dev/null
+    terminal_text "$SURFACE" "$TEXT" >/dev/null
+    terminal_key "$SURFACE" enter >/dev/null
     # paste-bracket / 입력 처리 안정화:
     # 긴 텍스트가 한 번에 들어가면 첫 Enter가 텍스트의 일부로 흡수되거나,
     # 입력창이 paste 종료 처리 중이라 첫 Enter가 무시되는 케이스가 있다.
@@ -274,7 +357,7 @@ case "$CMD" in
     case "$KIND" in
       codex|claude|antigravity)
         sleep 0.5
-        cmux send-key --surface "$SURFACE" enter >/dev/null
+        terminal_key "$SURFACE" enter >/dev/null
         ;;
     esac
     ;;
@@ -288,6 +371,11 @@ case "$CMD" in
       echo "Next: write the full Crosstalk message to disk before calling send-via-file." >&2
       exit 1
     fi
+    if [[ "$SURFACE" = ghostty:* ]]; then
+      BODY_FILE="$(cd "$(dirname "$BODY_FILE")" && pwd)/$(basename "$BODY_FILE")"
+      "$0" send "$SURFACE" "$TRIGGER_MSG — Read the task file $(printf '%q' "$BODY_FILE") and follow its instructions."
+      exit
+    fi
     # Antigravity(agy)는 claude/codex처럼 plain 트리거를 가로채는 상주 규약이 없다.
     # 대신 `/crosstalk-peer` 슬래시 커맨드(~/.gemini/commands/crosstalk-peer.toml)가
     # 트리거를 인자로 받아 run 파일을 읽고 처리한다. → 대상이 antigravity면 트리거를 슬래시 호출로 감싼다.
@@ -298,7 +386,7 @@ case "$CMD" in
       AGY_IDLE_WAIT="${AGY_IDLE_WAIT:-20}"
       WAITED=0
       while [ "$WAITED" -lt "$AGY_IDLE_WAIT" ]; do
-        SCREEN=$(cmux read-screen --surface "$SURFACE" --lines 80 2>/dev/null | tail -5)
+        SCREEN=$(terminal_screen "$SURFACE" 80 2>/dev/null | tail -5)
         echo "$SCREEN" | grep -q '? for shortcuts' && break
         sleep 1
         WAITED=$((WAITED + 1))
@@ -311,12 +399,12 @@ case "$CMD" in
 
   capture)
     SURFACE="${1:?surface required}"
-    cmux read-screen --surface "$SURFACE" --lines 200 2>/dev/null || true
+    terminal_screen "$SURFACE" 200 2>/dev/null || true
     ;;
 
   lines)
     SURFACE="${1:?surface required}"
-    cmux read-screen --surface "$SURFACE" --lines 200 2>/dev/null | wc -l | tr -d ' '
+    terminal_screen "$SURFACE" 200 2>/dev/null | wc -l | tr -d ' '
     ;;
 
   prompt-count)
@@ -324,7 +412,7 @@ case "$CMD" in
     # 메시지 1번 보내면 마커 1개 추가되는 게 정상. 그 이상이면 사용자가 끼어든 것.
     SURFACE="${1:?surface required}"
     KIND=$("$0" detect "$SURFACE")
-    CONTENT=$(cmux read-screen --surface "$SURFACE" --lines 500 2>/dev/null || echo "")
+    CONTENT=$(terminal_screen "$SURFACE" 500 2>/dev/null || echo "")
     case "$KIND" in
       codex)
         # Codex: 답변 시작에 "•" 불릿이 붙음. 그 개수 카운트
@@ -361,7 +449,7 @@ case "$CMD" in
     while [ "$ELAPSED" -lt "$MAX_WAIT" ]; do
       sleep 2
       ELAPSED=$((ELAPSED + 2))
-      CUR_LINES=$(cmux read-screen --surface "$SURFACE" --lines 200 2>/dev/null | wc -l | tr -d ' ')
+      CUR_LINES=$(terminal_screen "$SURFACE" 200 2>/dev/null | wc -l | tr -d ' ')
       if [ "$CUR_LINES" = "$PREV_LINES" ]; then
         STABLE_FOR=$((STABLE_FOR + 2))
         if [ "$STABLE_FOR" -ge "$STABLE_SECONDS" ] && [ "$CUR_LINES" -gt "$SINCE_LINES" ]; then
@@ -382,7 +470,7 @@ case "$CMD" in
     fi
 
     # 새로 추가된 라인만 출력 (since-line 이후)
-    cmux read-screen --surface "$SURFACE" --lines 200 2>/dev/null | tail -n +"$((SINCE_LINES + 1))"
+    terminal_screen "$SURFACE" 200 2>/dev/null | tail -n +"$((SINCE_LINES + 1))"
     ;;
 
   save)
@@ -395,7 +483,7 @@ case "$CMD" in
 
   stop)
     SURFACE="${1:?surface required}"
-    cmux send-key --surface "$SURFACE" c-c >/dev/null
+    terminal_key "$SURFACE" c-c >/dev/null
     ;;
 
   get-language)
@@ -624,11 +712,11 @@ case "$CMD" in
     NOTIFIED=0
     while read -r SURFACE; do
       [ -z "$SURFACE" ] && continue
-      cmux send --surface "$SURFACE" "/goal clear" >/dev/null 2>&1 || true
-      cmux send-key --surface "$SURFACE" enter >/dev/null 2>&1 || true
+      terminal_text "$SURFACE" "/goal clear" >/dev/null 2>&1 || true
+      terminal_key "$SURFACE" enter >/dev/null 2>&1 || true
       sleep 0.3
-      cmux send --surface "$SURFACE" "[crosstalk:cowork-stop] cowork run-$RUN_ID 강제 종료. 현재 진행분 그대로 두고 작업 멈춰." >/dev/null 2>&1 || true
-      cmux send-key --surface "$SURFACE" enter >/dev/null 2>&1 || true
+      terminal_text "$SURFACE" "[crosstalk:cowork-stop] cowork run-$RUN_ID 강제 종료. 현재 진행분 그대로 두고 작업 멈춰." >/dev/null 2>&1 || true
+      terminal_key "$SURFACE" enter >/dev/null 2>&1 || true
       NOTIFIED=$((NOTIFIED + 1))
     done < <(jq -r '.peers // {} | to_entries[] | .value' "$MANIFEST" 2>/dev/null)
 
@@ -710,7 +798,7 @@ case "$CMD" in
     while [ "$ELAPSED" -lt "$READY_MAX_WAIT" ]; do
       sleep "$READY_INTERVAL"
       ELAPSED=$((ELAPSED + READY_INTERVAL))
-      SCREEN=$(cmux read-screen --surface "$SURFACE" --lines 80 2>/dev/null | tail -20)
+      SCREEN=$(terminal_screen "$SURFACE" 80 2>/dev/null | tail -20)
 
       # auth 화면 먼저 (CLI가 아직 푸터 안 띄운 상태에서도 잡아줌)
       if detect_auth_from_screen "$SCREEN"; then
@@ -743,7 +831,11 @@ case "$CMD" in
     mkdir -p "$RUN_DIR/responses" "$RUN_DIR/done" "$RUN_DIR/preambles" "$RUN_DIR/rounds" "$RUN_DIR/assignments"
 
     # 사회자(=호출자) surface/kind 식별. ping callback이 이 pane에 메시지 보낸다.
-    MOD_SURFACE=$(self_surface 2>/dev/null || echo "")
+    if ! MOD_SURFACE=$(self_surface) || [ -z "$MOD_SURFACE" ]; then
+      rm -rf "$RUN_DIR"
+      echo "ERROR: cannot start a run without a verified moderator terminal" >&2
+      exit 1
+    fi
     MOD_KIND="${CROSSTALK_MODERATOR_KIND:-}"
     if [ -z "$MOD_KIND" ] && [ -n "$MOD_SURFACE" ]; then
       MOD_KIND=$("$0" detect "$MOD_SURFACE" 2>/dev/null || echo "unknown")
@@ -757,6 +849,11 @@ case "$CMD" in
         exit 1
         ;;
       ""|unknown)
+        if [[ "$MOD_SURFACE" = ghostty:* ]]; then
+          rm -rf "$RUN_DIR"
+          echo "ERROR: label the Ghostty caller or set CROSSTALK_MODERATOR_KIND=claude|codex" >&2
+          exit 1
+        fi
         # Backward-compatible fallback for Claude caller environments where UI detection fails.
         MOD_KIND="claude"
         ;;
@@ -766,6 +863,8 @@ case "$CMD" in
         exit 1
         ;;
     esac
+
+    if [[ "$MOD_SURFACE" = ghostty:* ]]; then ghostty_label "$MOD_SURFACE" "$MOD_KIND"; fi
 
     # VERSION 파일 단일 진실. 우선순위: 사용자 설치본 > 마켓 캐시 > unknown.
     BRIDGE_VERSION="unknown"
@@ -896,7 +995,7 @@ EOF
       sleep 2
       ELAPSED=$((ELAPSED + 2))
 
-      SCREEN=$(cmux read-screen --surface "$SURFACE" --scrollback --lines 1000 2>/dev/null || echo "")
+      SCREEN=$(terminal_screen "$SURFACE" 1000 scrollback 2>/dev/null || echo "")
 
       # screen 모드: BEGIN/END 블록 추출 후 RESP_FILE 에 저장 (idempotent, 매번 덮어씀).
       # AI는 답변을 화면에만 쓰기 때문에 bridge가 파일 transport 인터페이스를 *대신* 만들어준다.
@@ -1043,10 +1142,10 @@ EOF
         CALLBACK_MSG="[crosstalk] $AGENT R$ROUND done — RUN_ID=$RUN_ID. 답변은 $RESP_PATH 에서 읽고 다음 라운드 진행해."
         ;;
     esac
-    cmux send --surface "$MOD_SURFACE" "$CALLBACK_MSG" >/dev/null 2>&1
-    cmux send-key --surface "$MOD_SURFACE" enter >/dev/null 2>&1
+    terminal_text "$MOD_SURFACE" "$CALLBACK_MSG" >/dev/null 2>&1
+    terminal_key "$MOD_SURFACE" enter >/dev/null 2>&1
     sleep 0.5
-    cmux send-key --surface "$MOD_SURFACE" enter >/dev/null 2>&1
+    terminal_key "$MOD_SURFACE" enter >/dev/null 2>&1
 
     echo "OK ping=$AGENT-r$(printf '%02d' "$ROUND") → $MOD_SURFACE"
     ;;
@@ -1084,6 +1183,7 @@ EOF
     # surface 옵션: 활동 감지에 화면 변화도 보고 싶으면 SURFACE 환경변수로 전달.
     # 없으면 ping 파일만으로 판단.
     SURFACE_OPT="${WAIT_PING_SURFACE:-}"
+    [[ "$SURFACE_OPT" != ghostty:* ]] || SURFACE_OPT=""
 
     PREV_SCREEN_HASH=""
     LAST_ACTIVITY=0
@@ -1102,7 +1202,7 @@ EOF
 
       # 활동 감지 (있을 때만)
       if [ -n "$SURFACE_OPT" ]; then
-        SCREEN=$(cmux read-screen --surface "$SURFACE_OPT" --scrollback --lines 1000 2>/dev/null || echo "")
+        SCREEN=$(terminal_screen "$SURFACE_OPT" 1000 scrollback 2>/dev/null || echo "")
         CUR_HASH=$(printf '%s' "$SCREEN" | wc -c | tr -d ' ')
         if [ "$CUR_HASH" != "$PREV_SCREEN_HASH" ]; then
           LAST_ACTIVITY=$ELAPSED
@@ -1164,7 +1264,7 @@ EOF
     ;;
 
   *)
-    echo "Usage: $0 {peer|detect|list-peers|list-all|label|get-label|send|send-via-file|wait|capture|lines|prompt-count|save|stop|get-language|ensure-presets|wait-ready|start-run|make-msg-id|wait-turn|ping|wait-ping|read-response} [args...]" >&2
+    echo "Usage: $0 {backend|self|launch|ensure-peer|peer|detect|list-peers|list-all|label|get-label|send|send-via-file|wait|capture|lines|prompt-count|save|stop|get-language|ensure-presets|wait-ready|start-run|make-msg-id|wait-turn|ping|wait-ping|read-response} [args...]" >&2
     exit 2
     ;;
 esac

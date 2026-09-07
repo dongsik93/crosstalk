@@ -32,7 +32,7 @@ $crosstalk ask <question>
 
 ### Preconditions
 
-Run the checks from `readiness.md`. If outside cmux, save the question with `pending-save` and stop. If no peers are available, ask the user to launch.
+Run `readiness.md`, including automatic `ensure-peer codex claude` on Ghostty. Continue only when it succeeds. Preserve the topic and report the bridge error if preparation fails.
 
 ### Start run (preambles only)
 
