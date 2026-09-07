@@ -43,6 +43,8 @@ if ~/.claude/scripts/crosstalk_bridge.sh self >/dev/null 2>&1; then
 fi
 ```
 
+Ghostty에서는 `~/.claude/scripts/crosstalk status`도 실행해 메시지 수신/답변 상태를 표시한다. `receive`는 호출하지 않는다.
+
 ## 3단계: 사용자에게 표시
 
 `LANGUAGE=en`:

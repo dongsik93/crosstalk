@@ -113,6 +113,9 @@ npm --version || echo "NPM_MISSING"
 # gh (review 명령에 필요)
 which gh || echo "GH_MISSING"
 
+# Python 3 standard-library SQLite (Ghostty mailbox)
+python3 -c "import sqlite3" || echo "PYTHON_SQLITE_MISSING"
+
 # jq (config.json 파싱에 필요)
 which jq || echo "JQ_MISSING"
 
@@ -294,6 +297,17 @@ mkdir -p ~/.codex/skills/crosstalk
 # bridge 스크립트
 cp "$MARKETPLACE_ROOT/assets/scripts/crosstalk_bridge.sh" "$MARKETPLACE_ROOT/assets/scripts/crosstalk_ghostty.sh" ~/.claude/scripts/
 chmod +x ~/.claude/scripts/crosstalk_bridge.sh
+
+# Mailbox executable + shared Claude/Codex flow; Python 3 with sqlite3 is required.
+python3 -c 'import sqlite3' || exit 1
+cp "$MARKETPLACE_ROOT/assets/scripts/crosstalk" ~/.claude/scripts/crosstalk
+chmod +x ~/.claude/scripts/crosstalk
+cp "$MARKETPLACE_ROOT/assets/codex-skills/crosstalk/mailbox.md" ~/.claude/crosstalk/mailbox.md
+mkdir -p ~/.local/bin
+# Preserve an unrelated command instead of overwriting it.
+if [ ! -e ~/.local/bin/crosstalk ] && [ ! -L ~/.local/bin/crosstalk ]; then
+  ln -s "$HOME/.claude/scripts/crosstalk" ~/.local/bin/crosstalk
+fi
 
 # VERSION (bridge가 manifest 작성 시 읽음)
 [ -f "$MARKETPLACE_ROOT/VERSION" ] && cp "$MARKETPLACE_ROOT/VERSION" ~/.claude/crosstalk/VERSION

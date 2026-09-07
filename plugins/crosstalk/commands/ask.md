@@ -6,6 +6,8 @@ argument-hint: <질문>
 
 # /crosstalk:ask (가벼운 의견 수집 — fire-and-forget)
 
+For a new Ghostty request (bridge `backend` returns `ghostty`) or an incoming `[crosstalk] mailbox <ID>`, read `~/.claude/crosstalk/mailbox.md` and use that send/receive/reply workflow instead of the legacy steps below. Existing RUN_ID triggers and cmux runs still follow the legacy steps.
+
 각 peer에게 같은 질문을 한 번 던지고, 호출자도 자기 답을 그 자리에서 출력하고, 끝. callback도 ping도 통합도 없음.
 
 **analyze와 차이**: analyze는 ping/callback/verdict/핑퐁이 다 강제 — *합의가 목적*이라. ask는 그게 *전혀 없음* — *opinion sampling이 목적*이라.
@@ -55,7 +57,7 @@ if [ "$("$BRIDGE" backend)" = ghostty ]; then
 fi
 ```
 
-Ghostty는 화면 캡처 없이 파일 응답과 ping을 사용한다. 이후의 cmux 언급은 이 bridge를 통한 terminal 전송을 뜻한다.
+아래 파일 응답/ping 단계는 기존 RUN_ID 대화와 cmux용이다. 새 Ghostty 대화는 앞서 안내한 mailbox.md 절차를 사용한다.
 
 
 ```bash

@@ -7,6 +7,8 @@ description: Run Crosstalk multi-agent analysis, cowork, status, resume, and cal
 
 Use this skill when the user invokes `$crosstalk` or asks Codex to run Crosstalk as the caller/moderator.
 
+For incoming `[crosstalk] mailbox <ID>`, read `mailbox.md` first. For a new Ghostty topic/analyze/ask request, read `mailbox.md` and use send/receive/reply instead of the legacy file protocol. Check the backend with the bridge. Legacy RUN_ID callbacks still use the files listed below.
+
 This is a dispatcher. Do not inline every workflow from memory. Read exactly one flow file from this skill directory before acting:
 
 - `launch [claude]`: read `readiness.md` and run `bridge ensure-peer codex claude`.

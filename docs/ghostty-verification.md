@@ -1,5 +1,7 @@
 # Ghostty integration verification
 
+The original v0.9.0 file-transport checks are recorded below. The v0.10.0 SQLite mailbox checks are in the final section.
+
 Verified locally on 2026-09-08 with Ghostty 1.3.1 on macOS.
 
 ## Actual interactive CLI checks
@@ -40,3 +42,18 @@ Sources inspected:
 - [Gajae spawn substrate](https://github.com/Yeachan-Heo/gajae-code/blob/main/packages/coding-agent/src/sdk/broker/spawn-substrate.ts)
 - [Gajae SDK prompt transport](https://github.com/Yeachan-Heo/gajae-code/blob/main/packages/coding-agent/src/harness-control-plane/sdk-transport.ts)
 - [Gajae acceptance checks](https://github.com/Yeachan-Heo/gajae-code/blob/main/packages/coding-agent/src/harness-control-plane/session-transport.ts)
+
+## v0.10.0 — SQLite mailbox (2026-09-08)
+
+Actual existing Ghostty Codex and Claude panes exchanged requests and replies using the installed `crosstalk send`, `receive`, and `reply` commands. No per-message MD file or bridge ping was used for these checks.
+
+| Direction | Root request ID | Reply marker | Final states |
+| --- | --- | --- | --- |
+| Codex → Claude → Codex | `mailbox-smoke-codex-20260908` | `MAILBOX_CODEX_TO_CLAUDE_OK` | request replied; reply received |
+| Claude → Codex → Claude | `mailbox-smoke-claude-20260908` | `MAILBOX_CLAUDE_TO_CODEX_OK` | request replied; reply received |
+
+Runtime evidence is retained in the local user's `~/.claude/crosstalk/mailbox.sqlite3`. From a participating pane, `crosstalk history <root request ID>` displays the stored messages and receipt timestamps. The database is not committed.
+
+`python3 tests/test_mailbox.py` additionally checks concurrent receipt (one actionable result), explicit replay, stable send IDs, duplicate/conflicting replies, notification failures after durable storage, retries without duplicate inserts, participant-scoped reads, the 10-round cap, muted ask replies, invalid terminal IDs, and SQLite integrity. `python3 tests/test_bridge.py` retains legacy transport coverage.
+
+These tests do not establish unattended recovery from all permission dialogs, pane closure, or interrupted AI computation. The tool records receipt when the AI calls receive; replay after interrupted processing remains explicit.

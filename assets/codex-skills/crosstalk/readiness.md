@@ -29,4 +29,4 @@ If `self` fails, preserve a supplied topic with `pending-save` and show the brid
 osascript -e 'tell application "Ghostty" to get {id, name, working directory} of every terminal'
 ```
 
-Ghostty supports Claude/Codex with file responses and ping callbacks. Screen capture, UI footer detection, and screen transport are unavailable. Do not call `wait-ready` or `wait-turn` on Ghostty; `ensure-peer` handles startup.
+Ghostty uses the SQLite mailbox and send/receive/reply for new discussions. See `mailbox.md`. Existing file/ping runs can still finish. Screen capture, UI footer detection, and screen transport are unavailable. Do not call `wait-ready` or `wait-turn` on Ghostty; `ensure-peer` handles startup.

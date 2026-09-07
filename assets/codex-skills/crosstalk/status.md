@@ -19,6 +19,8 @@ Use:
 
 when the caller terminal can be identified.
 
+On Ghostty, also run `~/.claude/scripts/crosstalk status` to show pending/received/replied messages without consuming them.
+
 Output a compact status block and include both start commands:
 
 ```text

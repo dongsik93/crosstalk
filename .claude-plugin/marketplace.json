@@ -4,14 +4,14 @@
     "name": "dongsik93"
   },
   "metadata": {
-    "description": "Multi-agent analysis, ask, and co-work via cmux split panes — file-backed prompts, short cmux triggers, Claude or Codex caller.",
-    "version": "0.9.0"
+    "description": "Claude and Codex discussions in Ghostty with a durable SQLite mailbox; advanced cmux co-work and review workflows.",
+    "version": "0.10.0"
   },
   "plugins": [
     {
       "name": "crosstalk",
-      "description": "cmux-based multi-agent analysis + ask + co-work with file-based messaging and experimental Codex caller support via $crosstalk.",
-      "version": "0.9.0",
+      "description": "Claude and Codex discussions in Ghostty with a durable SQLite mailbox; advanced cmux co-work and review workflows.",
+      "version": "0.10.0",
       "author": {
         "name": "dongsik93"
       },

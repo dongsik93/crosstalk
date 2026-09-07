@@ -1,0 +1,223 @@
+#!/usr/bin/env python3
+"""Durable Ghostty mailbox. Python standard library only; terminal I/O stays in the bridge."""
+import argparse
+from datetime import datetime, timezone
+import json
+import os
+from pathlib import Path
+import re
+import shlex
+import sqlite3
+import subprocess
+import sys
+import uuid
+
+SCRIPT = Path(__file__).resolve()
+BRIDGE = Path(os.environ.get('CROSSTALK_BRIDGE', SCRIPT.with_name('crosstalk_bridge.sh')))
+GHOSTTY_ID = re.compile(r'ghostty:[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}')
+
+
+def bridge(*args):
+    result = subprocess.run([str(BRIDGE), *args], capture_output=True, text=True)
+    if result.returncode:
+        raise ValueError(result.stderr.strip() or result.stdout.strip() or 'Terminal operation failed')
+    return result.stdout.strip()
+
+
+def identity():
+    surface = bridge('self')
+    if not GHOSTTY_ID.fullmatch(surface):
+        raise ValueError('Mailbox requires a verified Ghostty caller. Use legacy workflows for cmux.')
+    return surface
+
+
+def now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def connect():
+    root = Path(os.environ.get('CROSSTALK_CONFIG_DIR', Path.home() / '.claude/crosstalk'))
+    root.mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(root / 'mailbox.sqlite3', timeout=10)
+    db.row_factory = sqlite3.Row
+    db.execute('PRAGMA foreign_keys=ON')
+    db.executescript('''
+        CREATE TABLE IF NOT EXISTS messages (
+            id TEXT PRIMARY KEY, thread_id TEXT NOT NULL,
+            reply_to TEXT UNIQUE REFERENCES messages(id),
+            sender TEXT NOT NULL, recipient TEXT NOT NULL,
+            body TEXT NOT NULL, mode TEXT NOT NULL CHECK(mode IN ('analyze','ask')),
+            round INTEGER NOT NULL CHECK(round BETWEEN 1 AND 10),
+            status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','received','replied')),
+            created_at TEXT NOT NULL, received_at TEXT, notify_error TEXT
+        );
+        CREATE INDEX IF NOT EXISTS inbox ON messages(recipient, status, created_at);
+        CREATE INDEX IF NOT EXISTS thread ON messages(thread_id, created_at);
+    ''')
+    return db
+
+
+def message(db, mid, actor):
+    row = db.execute('SELECT * FROM messages WHERE id=?', (mid,)).fetchone()
+    if row is None or actor not in (row['sender'], row['recipient']):
+        raise ValueError('Message not found in this terminal mailbox')
+    return row
+
+
+def envelope(row):
+    result = dict(row)
+    result['kind'] = 'reply' if row['reply_to'] else 'request'
+    body = row['body']
+    result['verdict'] = ('RESPECT_DISAGREE' if '[RESPECT_DISAGREE' in body else
+                         'DISAGREE' if '[DISAGREE' in body else
+                         'AGREE' if '[AGREE]' in body else 'NONE')
+    return result
+
+
+def notify(db, row):
+    # Input submission is not receipt: only receive() changes pending to received.
+    if row['status'] != 'pending' or (row['reply_to'] and row['mode'] == 'ask'):
+        return None
+    cli = shlex.quote(str(SCRIPT))
+    text = (f'[crosstalk] mailbox {row["id"]} — Run {cli} receive {row["id"]}. '
+            'If actionable=false, stop. For a request, answer using '
+            f'{cli} reply {row["id"]} --stdin (pipe your answer); no MD files or ping. '
+            'For a reply, compare it with your own view and summarize; do not reply to a reply.')
+    error = None
+    try:
+        bridge('send', row['recipient'], text)
+    except ValueError as exc:
+        error = str(exc)
+    with db:
+        db.execute('UPDATE messages SET notify_error=? WHERE id=?', (error, row['id']))
+    return error
+
+
+def content(args):
+    value = sys.stdin.read() if args.stdin else args.text
+    if value is None or not value.strip():
+        raise ValueError('A nonempty message body is required (text or --stdin)')
+    return value
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest='command', required=True)
+    send = commands.add_parser('send')
+    send.add_argument('peer', choices=['claude', 'codex'])
+    send.add_argument('text', nargs='?')
+    send.add_argument('--stdin', action='store_true')
+    send.add_argument('--id', help='Optional idempotency key; reuse it with the same request only')
+    send.add_argument('--thread', help='Root request ID for a follow-up (maximum 10 rounds)')
+    send.add_argument('--mode', choices=['analyze', 'ask'], default='analyze')
+    receive = commands.add_parser('receive')
+    receive.add_argument('id', nargs='?')
+    receive.add_argument('--replay', action='store_true', help='Explicitly reopen an interrupted, received message')
+    reply = commands.add_parser('reply')
+    reply.add_argument('id')
+    reply.add_argument('text', nargs='?')
+    reply.add_argument('--stdin', action='store_true')
+    for name in ('retry', 'history'):
+        commands.add_parser(name).add_argument('id')
+    status = commands.add_parser('status')
+    status.add_argument('id', nargs='?')
+    args = parser.parse_args()
+    if getattr(args, 'stdin', False) and args.text is not None:
+        parser.error('Choose text or --stdin, not both')
+    body = content(args) if args.command in ('send', 'reply') else None
+    actor = identity()
+    with connect() as db:
+        if args.command == 'send':
+            mid = args.id or uuid.uuid4().hex
+            if not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', mid):
+                raise ValueError('Message ID must be 1..64 letters, digits, underscores or hyphens')
+            # Resolve a single labelled peer in this tab; launch is handled by readiness/ensure-peer.
+            peers = [line.split('\t')[0] for line in bridge('list-peers').splitlines()
+                     if line.split('\t')[1:] == [args.peer]]
+            if len(peers) != 1 or peers[0] == actor or not GHOSTTY_ID.fullmatch(peers[0]):
+                raise ValueError('Need one labelled peer in this tab; run bridge ensure-peer <caller> <peer> first')
+            recipient = peers[0]
+            db.execute('BEGIN IMMEDIATE')
+            existing = db.execute('SELECT * FROM messages WHERE id=?', (mid,)).fetchone()
+            if existing:
+                if (existing['sender'], existing['recipient'], existing['body'], existing['mode'], existing['thread_id'], existing['reply_to']) != (actor, recipient, body, args.mode, args.thread or mid, None):
+                    raise ValueError('Message ID already belongs to a different request')
+            else:
+                round_number = 1
+                if args.thread:
+                    root = message(db, args.thread, actor)
+                    if root['id'] != root['thread_id'] or root['reply_to'] or (root['sender'], root['recipient'], root['mode']) != (actor, recipient, args.mode):
+                        raise ValueError('Follow-up must use the original caller, peer, mode and root ID')
+                    requests = db.execute('SELECT * FROM messages WHERE thread_id=? AND reply_to IS NULL ORDER BY round', (args.thread,)).fetchall()
+                    if requests[-1]['status'] != 'replied':
+                        raise ValueError('Wait for the preceding reply before starting another round')
+                    round_number = requests[-1]['round'] + 1
+                    if round_number > 10:
+                        raise ValueError('Conversation reached its 10-round limit')
+                db.execute('INSERT INTO messages(id,thread_id,sender,recipient,body,mode,round,created_at) VALUES(?,?,?,?,?,?,?,?)',
+                           (mid, args.thread or mid, actor, recipient, body, args.mode, round_number, now()))
+            db.commit()  # Store before attempting terminal input, which can fail or wake a peer immediately.
+            row = message(db, mid, actor)
+        elif args.command == 'receive':
+            if args.replay and not args.id:
+                raise ValueError('--replay requires an explicit message ID')
+            db.execute('BEGIN IMMEDIATE')
+            row = (message(db, args.id, actor) if args.id else db.execute(
+                "SELECT * FROM messages WHERE recipient=? AND status='pending' ORDER BY created_at,id LIMIT 1", (actor,)).fetchone())
+            if row is None:
+                print(json.dumps({'actionable': False, 'reason': 'empty'})); return
+            if row['recipient'] != actor:
+                raise ValueError('Only the recipient can receive this message')
+            if row['status'] != 'pending' and not (args.replay and row['status'] == 'received'):
+                print(json.dumps({'id': row['id'], 'actionable': False, 'status': row['status']})); return
+            db.execute("UPDATE messages SET status='received', received_at=COALESCE(received_at,?) WHERE id=?", (now(), row['id']))
+            db.commit()
+            result = envelope(message(db, row['id'], actor))
+            result['actionable'] = True
+            print(json.dumps(result, ensure_ascii=False)); return
+        elif args.command == 'reply':
+            db.execute('BEGIN IMMEDIATE')
+            original = message(db, args.id, actor)
+            if original['recipient'] != actor or original['reply_to']:
+                raise ValueError('Only the request recipient can reply; use send --thread for follow-ups')
+            row = db.execute('SELECT * FROM messages WHERE reply_to=?', (args.id,)).fetchone()
+            if row:
+                if row['body'] != body:
+                    raise ValueError('This request already has a different reply; it was not overwritten')
+            else:
+                if original['status'] != 'received':
+                    raise ValueError('Receive the request before replying')
+                mid = uuid.uuid4().hex
+                db.execute('INSERT INTO messages(id,thread_id,reply_to,sender,recipient,body,mode,round,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
+                           (mid, original['thread_id'], args.id, actor, original['sender'], body, original['mode'], original['round'], now()))
+                db.execute("UPDATE messages SET status='replied' WHERE id=?", (args.id,))
+                row = message(db, mid, actor)
+            db.commit()
+        elif args.command == 'retry':
+            row = message(db, args.id, actor)
+            if row['sender'] != actor:
+                raise ValueError('Only the sender can retry an input notification')
+        elif args.command == 'history':
+            row = message(db, args.id, actor)
+            rows = db.execute('SELECT * FROM messages WHERE thread_id=? ORDER BY round, reply_to IS NOT NULL', (row['thread_id'],)).fetchall()
+            print(json.dumps([envelope(r) for r in rows], ensure_ascii=False)); return
+        else:
+            rows = ([message(db, args.id, actor)] if args.id else db.execute(
+                'SELECT * FROM messages WHERE sender=? OR recipient=? ORDER BY created_at DESC LIMIT 50', (actor, actor)).fetchall())
+            print(json.dumps([{k: r[k] for k in r.keys() if k != 'body'} for r in rows], ensure_ascii=False)); return
+        error = notify(db, row)
+        result = {k: row[k] for k in ('id', 'thread_id', 'reply_to', 'status')}
+        result.update(saved=True, notification_error=error)
+        print(json.dumps(result, ensure_ascii=False))
+        if error:
+            print(f'Message saved. Retry notification with: {SCRIPT} retry {row["id"]}', file=sys.stderr)
+            sys.exit(1)
+
+
+if __name__ == '__main__':
+    os.umask(0o077)
+    try:
+        main()
+    except (ValueError, OSError, sqlite3.Error) as exc:
+        print(f'ERROR: {exc}', file=sys.stderr)
+        sys.exit(1)

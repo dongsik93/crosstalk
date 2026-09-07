@@ -1,11 +1,13 @@
 # Crosstalk
 
+English | [한국어](README.ko.md)
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.9.0-blue)
+![Version](https://img.shields.io/badge/version-0.10.0-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-black)
 
-Discuss a topic with Claude and Codex side by side in Ghostty. Ask from either CLI; Crosstalk reuses the other AI's pane or opens a native split, passes the question, and brings the response back. No tmux required.
+Discuss a topic with Claude and Codex side by side in Ghostty. Ask from either CLI. Crosstalk reuses the other AI's pane or opens a native split, sends the question, and returns the response. No tmux required.
 
 ![Crosstalk hero](docs/hero.png)
 
@@ -24,7 +26,7 @@ Crosstalk connects existing interactive AI CLIs. Start from Codex with `$crossta
 | Co-work and PR review | Not yet ported | Available; deep review experimental |
 | Screen capture / screen transport | Unavailable through the Ghostty 1.3 AppleScript API | Available |
 
-See the [Ghostty verification record](docs/ghostty-verification.md) for the actual checks and their limits. This checkout contains the Ghostty integration; an older marketplace installation must be updated before following its quick start.
+See the [Ghostty verification record](docs/ghostty-verification.md) for the actual checks and their limits. This checkout includes the Ghostty integration. Update older marketplace installations before following the quick start.
 
 ## Features
 
@@ -32,7 +34,7 @@ See the [Ghostty verification record](docs/ghostty-verification.md) for the actu
 - **Reuse existing CLI accounts**: Crosstalk does not introduce a separate model API integration.
 - **Automatic peer preparation**: launch the other CLI in the current directory when no labelled peer exists in the tab; wait for its startup acknowledgement before sending a task.
 - **Independent answers**: each participant receives the user's original topic.
-- **File-backed messages**: long prompts and responses live under `/tmp/crosstalk/run-*`; terminal input carries only short triggers and callbacks.
+- **Durable mailbox**: Ghostty requests and replies are stored in SQLite. `send`, `receive`, and `reply` handle IDs, receipt state, and reply notifications; AIs no longer manage per-message MD files or ping commands.
 - **Explicit verdicts**: the bridge parses `[AGREE]` and `[RESPECT_DISAGREE]` markers to guide subsequent rounds.
 - **Quick opinions**: `ask` lets each AI answer in its own pane without callbacks or aggregation.
 - **Advanced cmux workflows**: co-work in git worktrees, PR review, and Antigravity peers remain available through cmux.
@@ -45,6 +47,7 @@ See the [Ghostty verification record](docs/ghostty-verification.md) for the actu
 | Ghostty 1.3+ | Native Claude ↔ Codex workflow | macOS AppleScript support; no cmux or tmux required |
 | Claude Code and Codex CLI | Ghostty discussion | Install and authenticate both CLIs |
 | jq | Bridge and configuration | Required |
+| Python 3 with sqlite3 | Ghostty mailbox | Standard library only; no pip packages or server |
 | Node.js / npm | Installing npm-distributed AI CLIs | Not a separate Crosstalk runtime |
 | cmux 1.3+ | Alternative backend and advanced workflows | Optional for Ghostty discussion |
 | GitHub CLI (`gh`) | PR review | Optional |
@@ -96,6 +99,8 @@ Then run the one-time setup:
 
 This installs:
 
+- `~/.claude/scripts/crosstalk` and a `~/.local/bin/crosstalk` symlink (if that name is free)
+- `~/.claude/crosstalk/mailbox.md`
 - `~/.claude/scripts/crosstalk_bridge.sh`
 - `~/.claude/scripts/crosstalk_ghostty.sh`
 - `~/.claude/commands/crosstalk.md`
@@ -127,7 +132,7 @@ Ghostty tab
 
 For quick independent opinions, use `$crosstalk ask <question>` or `/crosstalk:ask <question>`. Each AI answers in its own pane; no combined result is produced.
 
-For status without launching a peer, invoke `$crosstalk` or `/crosstalk` without a topic. The readiness check shows the backend, caller, and peers. If the caller cannot be identified, report that error and preserve the topic for `$crosstalk resume` or `/crosstalk:resume`.
+To check status without launching a peer, run `$crosstalk` or `/crosstalk` without a topic. The readiness check shows the backend, caller, and peers. If the caller cannot be identified, report that error and preserve the topic for `$crosstalk resume` or `/crosstalk:resume`.
 
 ### Models and reasoning effort
 
@@ -153,9 +158,9 @@ Manual bridge commands:
 
 This first Ghostty integration covers Claude/Codex analyze, ask, and callbacks. Advanced cowork/review flows remain cmux-oriented. Ghostty 1.3 does not expose screen contents through AppleScript, so capture, screen transport, and footer-based readiness are unavailable. Unknown existing panes need an explicit `bridge label <ID> claude|codex|shell`.
 
-Long messages and responses stay in files; only a short trigger naming the file crosses the terminal input. This avoids large pastes and keeps interrupted exchanges inspectable. Completion ping is an acknowledgement of finished work, not guaranteed delivery of each input: busy CLIs and permission dialogs still need attention. No daemon, socket server, or clipboard is used. macOS may ask for Automation permission to control Ghostty.
+Long messages and responses stay in the local SQLite mailbox; Ghostty receives a short notification containing the message ID. Only `receive` acknowledges receipt. No daemon, socket server, or clipboard is used. macOS may ask for Automation permission to control Ghostty. Existing file/ping runs still work for compatibility.
 
-Run the isolated transport regression check with `python3 tests/test_bridge.py`.
+Run `python3 tests/test_bridge.py` and `python3 tests/test_mailbox.py` for isolated terminal and mailbox checks.
 
 ## Demo
 
@@ -207,54 +212,47 @@ These exist for manual control or recovery — you typically don't need them.
 | `/crosstalk:review [PR]` | cmux workflow: moderator-driven PR review using `gh pr diff`. |
 | `/crosstalk:review --deep [PR]` | cmux workflow: experimental deep PR review with checkout/stash/restore. |
 
-## How It Works
+## How It Works — Ghostty mailbox
 
-1. **Fan-out, raw, via files**: Crosstalk finds peer AI panes in the caller's Ghostty tab or cmux workspace, writes each peer's full prompt to disk, then sends only a short trigger through that terminal backend. No large prompt is typed into another pane.
-2. **Peers read their message file**: analyze preambles live in `preambles/<agent>.md`, ping-pong and review rounds live in `rounds/r<NN>-<agent>.md`, and cowork tasks live in `assignments/<agent>.md`.
-3. **Independent answers in parallel**: each peer writes its answer to a response file:
-   ```bash
-   cat > /tmp/crosstalk/run-<RUN_ID>/responses/<agent>-r<NN>.md <<'EOF'
-   <conclusion + reasoning + confidence + verdict marker>
-   EOF
-   ~/.claude/scripts/crosstalk_bridge.sh ping <RUN_ID> <agent> <round>
-   ```
-4. **Callback wakes the moderator**: `bridge ping` reads the manifest, finds the caller pane, and sends a short callback message with the response file path. Claude callers receive the legacy `[crosstalk] ...` message; Codex callers receive `$crosstalk callback RUN_ID=... AGENT=... ROUND=... RESP=...`. The caller exits between rounds — no polling, no idle bash process.
-5. **Deterministic verdict extraction**: when all peers ping, the bridge runs `extract-verdict` on each response file to parse `[AGREE]` / `[RESPECT_DISAGREE: reason]` / `confidence: high|medium|low` markers. The LLM does not interpret consensus.
-6. **Compare or ping-pong**:
-   - All `verdict=AGREE` → consensus. Print combined conclusion.
-   - One or more `RESPECT_DISAGREE` → respectful divergence. Print each verdict with its reason.
-   - Otherwise → one more file-backed round. Each peer sees the current divergence summary and updates: keep, change, agree, or respect-disagree.
-7. **Hard cap at 10 rounds** to prevent runaway loops.
+Both AI CLIs use the same shell commands:
 
-> Why file + trigger? Earlier versions sent full prompts through cmux input simulation. Large prompts could take 30-60 seconds to paste and make the caller command time out, risking duplicate fan-out. v0.6.0 writes every large message to disk and sends only a short deterministic trigger.
->
-> Why deterministic verdict extraction? Earlier versions had the moderator LLM decide "this looks like consensus." v0.3.0 makes verdict a parsed marker. The moderator only summarizes; it cannot silently end a run.
-
-Example Ghostty analysis run (Codex caller, Claude peer):
-
-```text
-/tmp/crosstalk/run-<RUN_ID>/
-  manifest.json          # caller terminal ID/kind, peers, mode, current_round
-  done/
-    codex-r01
-    claude-r01
-  responses/
-    codex-r01.md
-    claude-r01.md
-  preambles/
-    claude.md
-  rounds/
-    r02-claude.md
+```sh
+crosstalk send claude "What do you think of this design?"
+crosstalk receive
+crosstalk reply <MESSAGE_ID> "My analysis..."
 ```
 
-File-backed channels:
+Use `codex` as the destination when Claude is the caller. Readiness prepares the peer first with `bridge ensure-peer`; `send` requires exactly one labelled peer in the current tab. If `~/.local/bin` is not in PATH, use `~/.claude/scripts/crosstalk` directly. Long bodies can be piped via `--stdin` instead of passed as command arguments.
 
-- `preambles/<agent>.md`: analyze round 1 prompt.
-- `rounds/r<NN>-<agent>.md`: analyze ping-pong and review prompts.
-- `assignments/<agent>.md`: cowork task prompt.
-- `responses/<agent>-r<NN>.md`: peer answers and cowork reports.
+1. **Send** stores the body in `~/.claude/crosstalk/mailbox.sqlite3`, then notifies the peer using its exact Ghostty terminal ID.
+2. **Receive** atomically claims one pending message and returns its body as JSON. Duplicate notifications return `actionable: false`; they do not instruct the AI to process the request twice.
+3. **Reply** stores and links the answer, marks the request replied, and notifies the original caller. The AI does not write response files or call ping.
+4. **Compare**: the caller reads the reply, compares it against its own view, and summarizes or sends a follow-up with `send <peer> --thread <ROOT_ID>`. The tool enforces a maximum of 10 request/reply rounds per thread.
 
-The terminal backend receives only short triggers such as `[crosstalk] preamble codex RUN_ID=...`, `[crosstalk] round 02 codex RUN_ID=...`, `[crosstalk] cowork-task codex RUN_ID=...`, and callback messages.
+```text
+request: pending → received → replied
+                              └─ reply message: pending → received
+```
+
+The tool extracts explicit verdict markers from replies. A marker describes the peer's position; the caller still compares both views before claiming consensus. With `send --mode ask`, the answer is stored and printed in the peer pane, but no reply notification is sent to the caller.
+
+### Recovery
+
+| Command | Purpose |
+| --- | --- |
+| `status [ID]` | Inspect receipt/reply state and notification errors without consuming messages |
+| `history ID` | Read all messages in a thread |
+| `retry ID` | Resend a pending notification without inserting another message |
+| `receive ID --replay` | Deliberately resume a message received before an interruption |
+| `send ... --id <KEY>` | Reuse an ID for an identical request; conflicting content is rejected |
+
+If notification fails, the tool returns the saved message ID and exits nonzero. Use `retry` with that ID instead of creating another request. Repeating `reply` with the same body returns the existing reply; a different body cannot overwrite it.
+
+The database survives process restarts. It is private to the local user. It does not sandbox that user's AI processes. Both sides must use the same `CROSSTALK_CONFIG_DIR` if overriding the default. Terminal IDs remain the delivery addresses: closing a pane requires manual recovery; the tool does not silently redirect its messages to another pane. A busy CLI or permission dialog can still block wake-up. There is no unattended retry daemon.
+
+### Legacy file protocol
+
+cmux workflows and existing `RUN_ID` conversations continue using `/tmp/crosstalk/run-*` with `preambles/`, `rounds/`, `assignments/`, `responses/`, and completion `ping`. The old low-level `crosstalk_bridge.sh send <surface> <text>` remains available; it is separate from the new mailbox `crosstalk send <peer> <body>` command.
 
 ## Advanced workflows — cmux
 
@@ -264,7 +262,7 @@ For PR review, run `/crosstalk:review <PR>`. The experimental `--deep` variant c
 
 ### Co-work
 
-`analyze` is for *opinions*. `cowork` is for *delivery*. Hand out an assignment and a goal, each peer runs its own `/goal` slash command in its own CLI and works until it thinks the goal is met.
+`analyze` is for *opinions*. `cowork` is for *delivery*. Give each peer an assignment and a goal. Each runs its own `/goal` slash command in its CLI and works until it considers the goal met.
 
 ```text
 /crosstalk:cowork "claude=Repository layer, codex=ViewModel layer, goal=mail search feature shipping with passing tests"
@@ -336,18 +334,18 @@ Custom presets live here (each rule/persona file is loaded into the preamble ver
 
 - **macOS only**: the terminal backends currently require macOS.
 - **cmux CLI UI detection can change**: cmux launch readiness and auto-detection use CLI footer patterns. If detection fails, run `/crosstalk:setup` and label panes manually.
-- **No hard sandbox**: Crosstalk instructs peer CLIs to write only their response file, but it cannot fully sandbox another CLI process.
-- **Peer must call `bridge ping`**: completion is event-based — if a peer never pings, the moderator stays idle. You can manually call `bridge ping <RUN_ID> <agent> <round>` from any pane to unblock.
+- **No hard sandbox**: Crosstalk coordinates local CLI processes; it does not sandbox them.
+- **Legacy file runs require `bridge ping`**: completion is event-based — if a peer never pings, the moderator stays idle. You can manually call `bridge ping <RUN_ID> <agent> <round>` from any pane to unblock.
 - **AI may ignore transport instructions**: cmux opt-in `--transport file/screen` modes treat this as a protocol error with retry/skip/stop choices.
 - **Deep PR review is experimental**: it touches the current git worktree through checkout/stash/restore.
-- **Callbacks depend on CLI input handling**: Ghostty two-way transport has been checked locally, but a busy CLI or permission dialog may delay or prevent input processing. A completion ping does not guarantee delivery of every earlier trigger.
+- **Callbacks depend on CLI input handling**: Ghostty two-way transport has been checked locally, but a busy CLI or permission dialog may delay or prevent input processing. Check mailbox receipt state before assuming the peer started work; legacy ping does not acknowledge each earlier trigger.
 - **Antigravity caller is not supported**: Antigravity (`agy`) participates as a peer only; runs must be started from Claude or Codex.
 
 ## Roadmap
 
 - Ghostty support for advanced cowork/review workflows
 - Per-peer model and effort selection
-- Stronger message delivery acknowledgement
+- Unattended delivery recovery and explicit rebinding after pane closure
 - Antigravity moderator mode
 - Additional CLI adapters
 - tmux and zellij support

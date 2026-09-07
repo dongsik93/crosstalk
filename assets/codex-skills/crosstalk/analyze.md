@@ -1,5 +1,7 @@
 # $crosstalk analyze
 
+For a new Ghostty request or an incoming mailbox notification, read `mailbox.md` and follow it instead of the legacy steps below. Existing RUN_ID triggers still follow the legacy steps.
+
 Run independent multi-agent analysis from Codex as the moderator.
 
 ## Incoming peer triggers

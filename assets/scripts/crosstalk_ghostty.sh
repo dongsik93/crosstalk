@@ -131,7 +131,7 @@ ghostty_launch() {
   binding="$ready.surface"
   # The first real AI turn acknowledges startup; a title/label alone is not readiness.
   printf -v prompt 'printf ready > %q' "$ready"
-  prompt="Crosstalk startup check. Run exactly: $prompt . Then say Crosstalk ready and finish this turn. Do not modify project files. Later Crosstalk messages ask you to read a task file and follow it."
+  prompt="Crosstalk startup check. Run exactly: $prompt . Then say Crosstalk ready and finish this turn. Do not modify project files. Later [crosstalk] mailbox messages tell you to run crosstalk receive ID and reply ID; use those tools without MD files or ping. Legacy messages may still name task files."
   # The child waits for its exact ID before starting the CLI (same cwd is now ambiguous).
   printf -v command 'for i in {1..100}; do if [ -s %q ]; then export CROSSTALK_SURFACE_ID="$(cat %q)"; rm -f %q; exec %q %q; fi; sleep 0.1; done; echo "Crosstalk launch binding timed out" >&2; exit 1' "$binding" "$binding" "$binding" "$binary" "$prompt"
   printf -v command '/bin/bash -c %q' "$command"

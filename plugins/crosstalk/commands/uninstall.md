@@ -11,11 +11,14 @@ argument-hint: (인자 없음)
 **제거 대상**:
 - `~/.claude/scripts/crosstalk_bridge.sh`
 - `~/.claude/scripts/crosstalk_ghostty.sh`
+- `~/.claude/scripts/crosstalk` and its owned `~/.local/bin/crosstalk` symlink
+- `~/.claude/crosstalk/mailbox.md`
 - `~/.claude/commands/crosstalk.md` (단독 명령)
 - (v0.5 이후) `~/.codex/skills/crosstalk/`
 - (v0.8 이후) `~/.gemini/commands/crosstalk-peer.toml` (Antigravity peer 핸들러)
 
 **제거 안 함**:
+- `~/.claude/crosstalk/mailbox.sqlite3` (대화 기록 보존)
 - 플러그인 자체 (마켓에서 install된 것) → `/plugin uninstall crosstalk` 사용
 - npm 글로벌 패키지 (claude/codex) → 사용자가 직접 `npm uninstall -g`
 - antigravity(`agy`) standalone 바이너리 → 사용자가 직접 삭제 (보통 `~/.local/bin/agy`)
@@ -30,6 +33,8 @@ LANGUAGE=$(jq -r '.language // "en"' "$CONFIG" 2>/dev/null || echo "en")
 case "$LANGUAGE" in en|ko) ;; *) LANGUAGE="en" ;; esac
 
 ITEMS=()
+[ -f ~/.claude/scripts/crosstalk ] && ITEMS+=("~/.claude/scripts/crosstalk")
+[ -f ~/.claude/crosstalk/mailbox.md ] && ITEMS+=("~/.claude/crosstalk/mailbox.md")
 [ -f ~/.claude/scripts/crosstalk_bridge.sh ] && ITEMS+=("~/.claude/scripts/crosstalk_bridge.sh")
 [ -f ~/.claude/scripts/crosstalk_ghostty.sh ] && ITEMS+=("~/.claude/scripts/crosstalk_ghostty.sh")
 [ -f ~/.claude/commands/crosstalk.md ] && ITEMS+=("~/.claude/commands/crosstalk.md")
@@ -73,6 +78,11 @@ options:
 ## 3단계: 제거 실행
 
 ```bash
+if [ "$(readlink ~/.local/bin/crosstalk 2>/dev/null)" = "$HOME/.claude/scripts/crosstalk" ]; then
+  rm -f ~/.local/bin/crosstalk
+fi
+rm -f ~/.claude/scripts/crosstalk ~/.claude/crosstalk/mailbox.md
+# Keep mailbox.sqlite3 and its conversation history.
 rm -f ~/.claude/scripts/crosstalk_bridge.sh ~/.claude/scripts/crosstalk_ghostty.sh
 rm -f ~/.claude/commands/crosstalk.md
 rm -rf ~/.codex/skills/crosstalk

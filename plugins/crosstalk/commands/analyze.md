@@ -6,6 +6,8 @@ argument-hint: <분석 주제 / 자료 본문>
 
 # /crosstalk:analyze (사회자 없는 독립 분석 + 조건부 핑퐁)
 
+For a new Ghostty request (bridge `backend` returns `ghostty`) or an incoming `[crosstalk] mailbox <ID>`, read `~/.claude/crosstalk/mailbox.md` and use that send/receive/reply workflow instead of the legacy steps below. Existing RUN_ID triggers and cmux runs still follow the legacy steps.
+
 ## 컨셉
 
 사용자가 던진 주제를 **각 참가자(호출자 + 켜져있는 peer 전원)가 독립적으로 분석**하고, 결과를 비교한다. 사회자(중재자)가 따로 없다 — 호출한 본인이 fan-out + 비교표 출력 책임만 진다.
@@ -95,7 +97,7 @@ if [ "$("$BRIDGE" backend)" = ghostty ]; then
 fi
 ```
 
-Ghostty는 화면 캡처 없이 파일 응답과 ping을 사용한다. 이후의 cmux 언급은 이 bridge를 통한 terminal 전송을 뜻한다.
+아래 파일 응답/ping 단계는 기존 RUN_ID 대화와 cmux용이다. 새 Ghostty 대화는 앞서 안내한 mailbox.md 절차를 사용한다.
 
 
 ```bash

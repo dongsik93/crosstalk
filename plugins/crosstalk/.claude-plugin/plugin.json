@@ -1,7 +1,7 @@
 {
   "name": "crosstalk",
-  "version": "0.9.0",
-  "description": "Multi-agent analysis + ask + co-work powered by cmux split panes, with file-based messaging and experimental Codex caller support via $crosstalk.",
+  "version": "0.10.0",
+  "description": "Claude and Codex discussions in Ghostty with a durable SQLite mailbox; advanced cmux co-work and review workflows.",
   "author": {
     "name": "dongsik93"
   }

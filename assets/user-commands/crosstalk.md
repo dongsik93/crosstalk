@@ -6,6 +6,8 @@ argument-hint: <분석 주제>
 
 # /crosstalk
 
+For an incoming `[crosstalk] mailbox <ID>` notification, read `~/.claude/crosstalk/mailbox.md` and handle it without starting a new run.
+
 Use the full `$ARGUMENTS` as the raw topic. Preserve its wording.
 
 ```bash
@@ -28,7 +30,7 @@ PEER=$("$BRIDGE" ensure-peer claude codex)
 
 This reuses a labelled Codex in the same tab or splits right and starts Codex in the current directory. On startup timeout, let the user finish login/trust prompts in that existing pane; do not launch a duplicate or bypass permissions.
 
-Then read and execute `/crosstalk:analyze` with the unchanged topic. All terminal communication uses the bridge. Ghostty uses file responses plus ping callbacks, not screen capture. On cmux, run `/crosstalk:launch` if peers are missing and then continue analyze.
+On Ghostty, read `~/.claude/crosstalk/mailbox.md` and use its send/receive/reply flow with the unchanged topic. Do not execute the legacy file/ping analysis flow for a new Ghostty discussion. On cmux, run `/crosstalk:launch` if peers are missing and then continue `/crosstalk:analyze`.
 
 For an incoming Crosstalk peer message, read the task file named in the message and follow its response/ping instructions instead of starting another run. For a completion callback, restore that run's manifest and continue its existing analysis rounds; do not launch a new run.
 
