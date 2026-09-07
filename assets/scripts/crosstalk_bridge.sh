@@ -69,16 +69,42 @@ set -euo pipefail
 # Target IDs carry their backend so callbacks work even from a different environment.
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/crosstalk_ghostty.sh"
 
+# CLI subprocesses may omit TERM_PROGRAM or retain variables from an old terminal.
+terminal_process_backend() {
+  local pid="$$" parent executable
+  while [ "$pid" -gt 1 ]; do
+    read -r parent executable <<< "$(ps -o ppid=,comm= -p "$pid" 2>/dev/null)"
+    case "${executable##*/}" in
+      ghostty|Ghostty) echo ghostty; return 0 ;;
+      cmux) echo cmux; return 0 ;;
+    esac
+    case "$parent" in ''|*[!0-9]*) break ;; esac
+    [ "$parent" != "$pid" ] || break
+    pid="$parent"
+  done
+  return 1
+}
+
 terminal_backend() {
+  local detected
   case "${CROSSTALK_BACKEND:-}" in
-    ghostty|cmux) echo "$CROSSTALK_BACKEND" ;;
-    "")
-      if [[ "${CROSSTALK_SURFACE_ID:-}" = ghostty:* ]]; then echo ghostty
-      elif [ -n "${CMUX_SURFACE_ID:-}" ] || [ -n "${CMUX_WORKSPACE_ID:-}" ]; then echo cmux
-      elif [ "${TERM_PROGRAM:-}" = ghostty ]; then echo ghostty
-      else echo cmux; fi ;;
+    ghostty|cmux) echo "$CROSSTALK_BACKEND"; return ;;
+    "") ;;
     *) echo "ERROR: CROSSTALK_BACKEND must be ghostty or cmux" >&2; return 1 ;;
   esac
+  if [[ "${CROSSTALK_SURFACE_ID:-}" = ghostty:* ]]; then
+    echo ghostty
+  elif detected=$(terminal_process_backend); then
+    echo "$detected"
+  elif [ "${TERM_PROGRAM:-}" = ghostty ] || [ -n "${GHOSTTY_RESOURCES_DIR:-}" ] || [ -n "${GHOSTTY_BIN_DIR:-}" ]; then
+    echo ghostty
+  elif { [ -n "${CMUX_SURFACE_ID:-}" ] || [ -n "${CMUX_WORKSPACE_ID:-}" ] || [ "${TERM_PROGRAM:-}" = cmux ]; } && \
+       cmux identify 2>/dev/null | jq -e '.caller.surface_ref | strings | select(length > 0)' >/dev/null; then
+    echo cmux
+  else
+    echo "ERROR: cannot identify the caller terminal. No live Ghostty/cmux evidence; a leftover socket is not enough. Set CROSSTALK_BACKEND explicitly if needed." >&2
+    return 1
+  fi
 }
 
 terminal_surfaces() {
@@ -223,6 +249,11 @@ case "$CMD" in
 
   self)
     self_surface
+    ;;
+
+  bind)
+    [ "$(terminal_backend)" = ghostty ] || { echo "ERROR: bind is for a Ghostty caller" >&2; exit 1; }
+    ghostty_bind "${1:?Ghostty terminal ID required}"
     ;;
 
   launch)
@@ -1264,7 +1295,7 @@ EOF
     ;;
 
   *)
-    echo "Usage: $0 {backend|self|launch|ensure-peer|peer|detect|list-peers|list-all|label|get-label|send|send-via-file|wait|capture|lines|prompt-count|save|stop|get-language|ensure-presets|wait-ready|start-run|make-msg-id|wait-turn|ping|wait-ping|read-response} [args...]" >&2
+    echo "Usage: $0 {backend|self|bind|launch|ensure-peer|peer|detect|list-peers|list-all|label|get-label|send|send-via-file|wait|capture|lines|prompt-count|save|stop|get-language|ensure-presets|wait-ready|start-run|make-msg-id|wait-turn|ping|wait-ping|read-response} [args...]" >&2
     exit 2
     ;;
 esac

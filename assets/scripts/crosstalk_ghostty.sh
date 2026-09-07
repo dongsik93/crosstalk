@@ -7,10 +7,14 @@ on run argv
   tell application "Ghostty"
     if op is "find-cwd" then
       set matches to {}
+      set candidates to ""
       repeat with term in terminals
-        if working directory of term is (item 2 of argv) then set end of matches to id of term
+        if working directory of term is (item 2 of argv) then
+          set end of matches to id of term
+          set candidates to candidates & "ghostty:" & id of term & " | " & name of term & linefeed
+        end if
       end repeat
-      if (count of matches) is not 1 then error "Caller is ambiguous: set CROSSTALK_SURFACE_ID=ghostty:<UUID> explicitly (see Ghostty terminal IDs)."
+      if (count of matches) is not 1 then error "Cannot identify caller uniquely in this directory. Candidates:" & linefeed & candidates & "From the intended CLI, run crosstalk_bridge.sh bind ghostty:<UUID> once. Do not guess the focused pane."
       return item 1 of matches
     end if
     set tid to item 2 of argv
@@ -63,33 +67,53 @@ ghostty_id() {
   printf '%s\n' "$id"
 }
 
+ghostty_caller() {
+  local pid="$$" device parent
+  while [ "$pid" -gt 1 ]; do
+    read -r parent device <<< "$(ps -o ppid=,tty= -p "$pid")"
+    if [[ "$device" =~ ^ttys[0-9]+$ ]]; then break; fi
+    case "$parent" in ''|*[!0-9]*) break ;; esac
+    [ "$parent" != "$pid" ] || break
+    pid="$parent"
+  done
+  if [[ ! "${device:-}" =~ ^ttys[0-9]+$ ]]; then
+    echo "ERROR: no caller TTY. Run inside Ghostty or set CROSSTALK_SURFACE_ID=ghostty:<UUID>." >&2
+    return 1
+  fi
+  printf '%s\t%s\t%s\n' "$pid" "$device" "$(ps -o lstart= -p "$pid")"
+}
+
+ghostty_bind() {
+  local id context pid device stamp cache
+  id=$(ghostty_id "$1") || return
+  ghostty_rpc exists "$id" >/dev/null || return
+  context=$(ghostty_caller) || return
+  IFS=$'\t' read -r pid device stamp <<< "$context"
+  cache="${CROSSTALK_CONFIG_DIR:-$HOME/.claude/crosstalk}/ghostty/bind-$pid.json"
+  mkdir -p "$(dirname "$cache")"
+  jq -n --arg id "$id" --arg stamp "$stamp" --arg tty "$device" \
+    '{id: $id, stamp: $stamp, tty: $tty}' > "$cache"
+  printf 'ghostty:%s\n' "$id"
+}
+
 ghostty_self() {
-  local pid="$$" device parent id cache stamp
+  local context pid device id cache stamp
   if [ -n "${CROSSTALK_SURFACE_ID:-}" ]; then
     id=$(ghostty_id "$CROSSTALK_SURFACE_ID") || return
     ghostty_rpc exists "$id" >/dev/null || return
   else
-    while [ "$pid" -gt 1 ]; do
-      read -r parent device <<< "$(ps -o ppid=,tty= -p "$pid")"
-      if [[ "$device" =~ ^ttys[0-9]+$ ]]; then break; fi
-      pid="${parent:-1}"
-    done
-    if [[ ! "${device:-}" =~ ^ttys[0-9]+$ ]]; then
-      echo "ERROR: no caller TTY. Run inside Ghostty or set CROSSTALK_SURFACE_ID=ghostty:<UUID>." >&2
-      return 1
-    fi
-    stamp=$(ps -o lstart= -p "$pid")
+    context=$(ghostty_caller) || return
+    IFS=$'\t' read -r pid device stamp <<< "$context"
     cache="${CROSSTALK_CONFIG_DIR:-$HOME/.claude/crosstalk}/ghostty/bind-$pid.json"
     id=$(jq -r --arg stamp "$stamp" --arg tty "$device" 'select(.stamp == $stamp and .tty == $tty) | .id' "$cache" 2>/dev/null || true)
     if [ -n "$id" ]; then
       ghostty_id "$id" >/dev/null || return
       ghostty_rpc exists "$id" >/dev/null || return
     else
-      # ponytail: first binding needs a unique cwd; ambiguous tabs require an explicit terminal ID.
+      # ponytail: initial binding needs a unique cwd; use bind <ID> for ambiguous tabs.
       id=$(ghostty_rpc find-cwd "$PWD") || return
-      mkdir -p "$(dirname "$cache")"
-      jq -n --arg id "$id" --arg stamp "$stamp" --arg tty "$device" \
-        '{id: $id, stamp: $stamp, tty: $tty}' > "$cache"
+      ghostty_bind "$id"
+      return
     fi
   fi
   printf 'ghostty:%s\n' "$id"

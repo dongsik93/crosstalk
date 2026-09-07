@@ -34,12 +34,23 @@ elif op == 'split': print(alive[-1])
 import json, os, sys
 with open(os.environ['TEST_LOG'], 'a') as out:
     out.write(json.dumps(['cmux'] + sys.argv[1:]) + '\\n')
+if os.environ.get('TEST_CMUX_DOWN') == '1': sys.exit(1)
 if sys.argv[1] == 'identify': print('{"caller": {\\n"surface_ref": "surface:1"}}')
 elif sys.argv[1] == 'list-panes': print('pane:1')
 elif sys.argv[1] == 'list-pane-surfaces': print('surface:1 ct-codex\\nsurface:2 ct-claude')
 elif sys.argv[1] == 'read-screen': print('screen text')
 ''')
     cmux.chmod(0o755)
+    ps = root / 'ps'
+    ps.write_text('''#!/usr/bin/env python3
+import os, sys
+name = os.environ.get('TEST_PARENT_TERMINAL', 'other')
+if 'ppid=,tty=' in sys.argv:
+    print('1 ttys555' if sys.argv[-1]=='4242' else '4242 ??')
+elif 'lstart=' in sys.argv: print(os.environ.get('TEST_START', 'Mon Sep 7 22:58:00 2026'))
+else: print('1 /Applications/' + name + '.app/Contents/MacOS/' + name)
+''')
+    ps.chmod(0o755)
     alive = root / 'alive.json'
     alive.write_text(json.dumps([A, B]))
     env = dict(os.environ, PATH=f'{root}:{os.environ["PATH"]}', TEST_LOG=str(log),
@@ -56,6 +67,17 @@ elif sys.argv[1] == 'read-screen': print('screen text')
     def events():
         return [json.loads(line) for line in log.read_text().splitlines()]
 
+    auto = dict(CROSSTALK_BACKEND='', CROSSTALK_SURFACE_ID='', TERM_PROGRAM='',
+                GHOSTTY_RESOURCES_DIR='', GHOSTTY_BIN_DIR='', CMUX_SURFACE_ID='', CMUX_WORKSPACE_ID='')
+    assert run('backend', **(auto | {'TEST_PARENT_TERMINAL': 'ghostty'})) == 'ghostty'
+    assert run('backend', **(auto | {'GHOSTTY_RESOURCES_DIR': '/Applications/Ghostty.app/Contents/Resources'})) == 'ghostty'
+    assert run('backend', **(auto | {'GHOSTTY_BIN_DIR': '/Applications/Ghostty.app/Contents/MacOS'})) == 'ghostty'
+    assert run('backend', **(auto | {'TERM_PROGRAM': 'ghostty', 'CMUX_SURFACE_ID': 'stale', 'TEST_CMUX_DOWN': '1'})) == 'ghostty'
+    assert run('backend', **(auto | {'TEST_PARENT_TERMINAL': 'ghostty', 'CMUX_SURFACE_ID': 'stale'})) == 'ghostty'
+    assert run('backend', **(auto | {'TEST_PARENT_TERMINAL': 'cmux', 'GHOSTTY_BIN_DIR': 'inherited'})) == 'cmux'
+    assert run('backend', **(auto | {'CMUX_SURFACE_ID': 'surface:1'})) == 'cmux'
+    run('backend', ok=False, **(auto | {'CMUX_SURFACE_ID': 'stale', 'TEST_CMUX_DOWN': '1'}))
+    run('backend', ok=False, **auto)
     assert run('self') == f'ghostty:{A}'
     run('self', ok=False, CROSSTALK_BACKEND='invalid')
     run('label', f'ghostty:{A}', 'codex')
@@ -63,6 +85,12 @@ elif sys.argv[1] == 'read-screen': print('screen text')
     assert run('list-peers') == f'ghostty:{B}\tclaude'
     assert run('ensure-peer', 'codex') == f'ghostty:{B}'
     assert not any(e[0] == 'split' for e in events())
+    # Explicit selection is remembered for this caller, without changing parent environment.
+    run('self', ok=False, CROSSTALK_SURFACE_ID='')  # ambiguous/missing cwd lookup
+    assert run('bind', f'ghostty:{A}') == f'ghostty:{A}'
+    assert run('self', CROSSTALK_SURFACE_ID='') == f'ghostty:{A}'
+    run('self', ok=False, CROSSTALK_SURFACE_ID='', TEST_START='a different process start')
+    run('bind', 'ghostty:invalid', ok=False)
     # Untrusted text is a single argv value, never AppleScript or shell code.
     payload = '한글 "quote" \\ backslash\n$HOME $(touch NEVER) `echo nope`'
     run('send', f'ghostty:{B}', payload)

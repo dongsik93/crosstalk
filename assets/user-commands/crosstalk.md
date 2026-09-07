@@ -34,4 +34,4 @@ On Ghostty, read `~/.claude/crosstalk/mailbox.md` and use its send/receive/reply
 
 For an incoming Crosstalk peer message, read the task file named in the message and follow its response/ping instructions instead of starting another run. For a completion callback, restore that run's manifest and continue its existing analysis rounds; do not launch a new run.
 
-Ghostty's first binding requires a unique working directory. If ambiguous, set `CROSSTALK_SURFACE_ID=ghostty:<UUID>` for bridge calls; never select an arbitrary same-directory terminal. List IDs with `osascript -e 'tell application "Ghostty" to get {id, name, working directory} of every terminal'`.
+Ghostty's first binding requires a unique working directory. If ambiguous, run `/crosstalk:setup --surface ghostty:<UUID>` once from this CLI after selecting its candidate ID; never select an arbitrary same-directory terminal. List IDs with `osascript -e 'tell application "Ghostty" to get {id, name, working directory} of every terminal'`.

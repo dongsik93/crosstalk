@@ -3,7 +3,7 @@
 [English](README.md) | [한국어](README.ko.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.10.0-blue)
+![Version](https://img.shields.io/badge/version-0.10.1-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-black)
 
@@ -139,6 +139,10 @@ Ghostty tab
 현재 Crosstalk은 모델이나 effort를 지정하지 않습니다. 재사용한 pane은 기존 세션 설정을 유지하고, 새 CLI는 자체 기본값을 사용합니다. Codex 설정을 Claude에 복사하거나 그 반대로 전달하지 않습니다. Crosstalk 전용 모델/effort 재정의 옵션은 아직 없습니다.
 
 ## Ghostty 설정 및 문제 해결
+
+터미널을 감지할 때 Ghostty 환경변수와 호출자의 상위 프로세스를 함께 확인합니다. `TERM_PROGRAM`이 없다고 cmux로 간주하지 않으며, 오래된 소켓 파일만으로 터미널이 실행 중이라고 판단하지 않습니다.
+
+같은 프로젝트 디렉터리의 pane이 여러 개면 오류에 ID와 제목이 표시됩니다. 해당 CLI에서 `~/.claude/scripts/crosstalk_bridge.sh bind ghostty:<UUID>`를 한 번 실행하세요. Claude에서는 `/crosstalk:setup --surface ghostty:<UUID>`로 지정할 수도 있습니다. 선택은 해당 CLI 프로세스가 살아 있는 동안 유지됩니다. 다른 CLI에서 대신 실행하면 안 됩니다.
 
 시작 대기 시간이 초과되면 기존 상대 pane에서 로그인이나 신뢰 확인을 마친 뒤 다시 시도하세요. Crosstalk은 시작 대기 상태를 기록하므로 재시도할 때 중복 pane을 만들지 않습니다.
 

@@ -23,7 +23,7 @@ This reuses one labelled Claude peer in the caller's tab or splits right and lau
 
 On cmux, keep the existing launch/setup flow if no peers exist.
 
-If `self` fails, preserve a supplied topic with `pending-save` and show the bridge error. Do not guess the focused pane. The initial Ghostty binding requires a unique working directory across Ghostty terminals; if ambiguous, use `CROSSTALK_SURFACE_ID=ghostty:<UUID>` consistently for bridge calls. IDs are available through:
+If `self` fails, preserve a supplied topic with `pending-save` and show the bridge error. Do not guess the focused pane. The initial Ghostty binding requires a unique working directory across Ghostty terminals; if ambiguous, show the candidate IDs/titles and have the user select the current CLI. Run `bridge bind ghostty:<UUID>` from that CLI once. An explicit `CROSSTALK_SURFACE_ID=ghostty:<UUID>` remains available for one-off calls. Do not start cmux because an environment variable is missing. IDs are available through:
 
 ```bash
 osascript -e 'tell application "Ghostty" to get {id, name, working directory} of every terminal'

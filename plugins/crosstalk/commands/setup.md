@@ -1,10 +1,16 @@
 ---
-description: Label cmux panes for Crosstalk detection, or switch UI language with --language en|ko.
+description: Identify and label Ghostty or cmux panes; bind an existing Ghostty caller with --surface <ID>.
 allowed-tools: Bash, AskUserQuestion
-argument-hint: [--language en|ko]
+argument-hint: [--language en|ko] [--surface ghostty:<UUID>]
 ---
 
-# Crosstalk Setup — cmux 라벨링 / 언어 전환
+# Crosstalk Setup — 터미널 식별·라벨링 / 언어 전환
+
+먼저 `~/.claude/scripts/crosstalk_bridge.sh backend`로 실제 백엔드를 확인한다. 환경변수 누락이나 self 실패를 cmux 실행 필요로 해석하지 않는다.
+
+Ghostty에서 `--surface ghostty:<UUID>`를 지정하면 현재 CLI의 도구 셸에서 `~/.claude/scripts/crosstalk_bridge.sh bind ghostty:<UUID>`를 실행한다. 이 연결은 현재 CLI 프로세스가 살아 있는 동안 유지된다. 명령을 다른 CLI에서 대신 실행하지 않는다.
+
+Ghostty의 `self`가 같은 디렉터리의 여러 후보를 반환하면 ID와 제목을 보여주고 사용자가 현재 CLI에 해당하는 후보를 고르게 한다. 선택한 ID로 `bind`한 뒤 `list-all`과 라벨링을 계속한다. 포커스나 첫 후보를 임의로 고르지 않는다. 이 경우 cmux 실행이나 CLI 재시작을 요구하지 않는다.
 
 두 가지 용도:
 

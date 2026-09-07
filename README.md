@@ -3,7 +3,7 @@
 English | [한국어](README.ko.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.10.0-blue)
+![Version](https://img.shields.io/badge/version-0.10.1-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-black)
 
@@ -139,6 +139,10 @@ To check status without launching a peer, run `$crosstalk` or `/crosstalk` witho
 Crosstalk does not currently set a model or effort level. Reused panes keep their session settings; newly launched CLIs use their own defaults. Codex settings are not copied to Claude, or vice versa. There is no Crosstalk-specific model/effort override yet.
 
 ## Ghostty setup and troubleshooting
+
+Terminal detection checks the caller's process ancestry as well as Ghostty environment variables; a missing `TERM_PROGRAM` no longer defaults to cmux. A stale socket alone is not treated as a running terminal.
+
+If multiple Ghostty panes share the project directory, the error lists their IDs and titles. In the intended CLI, run `~/.claude/scripts/crosstalk_bridge.sh bind ghostty:<UUID>` once, or `/crosstalk:setup --surface ghostty:<UUID>` from Claude. The selection is remembered for that CLI process; do not run the bind command from a different CLI on its behalf.
 
 If startup times out, finish login/trust prompts in the existing peer pane and retry. Crosstalk keeps track of that pending startup so a retry does not create a duplicate.
 
