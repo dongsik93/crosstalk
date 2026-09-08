@@ -24,10 +24,12 @@ If the bridge is missing, run `/crosstalk:install`. If `self` fails, preserve a 
 
 With no topic: show backend, caller, peers, and one next action. Do not launch peers merely to display status.
 
-With a topic on Ghostty:
+Before creating a new Ghostty peer, read the new-peer permission choice in `~/.claude/crosstalk/mailbox.md` and ask whether to retain CLI defaults or explicitly auto-approve this launch. Reusing an existing peer does not ask again or change permissions.
+
+With a topic on Ghostty, use Codex by default. If the user explicitly requests agy/Antigravity, set PEER_KIND=antigravity and use that same target for sending:
 
 ```bash
-PEER=$("$BRIDGE" ensure-peer claude codex)
+PEER=$("$BRIDGE" ensure-peer claude "${PEER_KIND:-codex}")
 ```
 
 This reuses a labelled Codex in the same tab or splits right and starts Codex in the current directory. On startup timeout, let the user finish login/trust prompts in that existing pane; do not launch a duplicate or bypass permissions.

@@ -23,6 +23,7 @@ if cmd=='get-language': print(os.environ.get('TEST_LANGUAGE','en'))
 elif cmd=='self': print(actor)
 elif cmd=='list-peers':
     print({B!r}+'\\tclaude' if actor=={A!r} else {A!r}+'\\tcodex')
+    if actor!={C!r}: print({C!r}+'\\tantigravity')
 elif cmd=='send':
     if os.environ.get('TEST_FAIL')=='1':
         print('terminal closed or busy',file=sys.stderr);sys.exit(1)
@@ -138,6 +139,13 @@ else: sys.exit(1)
     assert call(A,'history',two['id'])[0]['body']=='body two'
     control = call(A,'send','claude','full body remains intact','--summary','line 1\n\x1b[31m' + '긴' * 200)
     assert call(B,'receive')['body']=='full body remains intact'
+    for caller, destination in [(A,'agy'), (B,'antigravity')]:
+        request=call(caller,'send',destination,'Agy peer question','--summary','Agy question summary')
+        item=call(C,'receive')
+        assert item['id']==request['id'] and item['recipient']==C and item['sender']==caller
+        answer=call(C,'reply',item['id'],'Agy answer','--summary','Agy answer summary')
+        item=call(caller,'receive')
+        assert item['id']==answer['id'] and item['reply_to']==request['id'] and item['body']=='Agy answer'
     for target, text in map(json.loads,log.read_text().splitlines()):
         assert text.startswith('[Crosstalk] ') and len(text) < 200
         assert ' — Run ' not in text and str(CLI) not in text

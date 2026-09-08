@@ -3,11 +3,11 @@
 English | [한국어](README.ko.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.10.3-blue)
+![Version](https://img.shields.io/badge/version-0.10.4-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-black)
 
-Discuss a topic with Claude and Codex side by side in Ghostty. Ask from either CLI. Crosstalk reuses the other AI's pane or opens a native split, sends the question, and returns the response. No tmux required.
+Discuss a topic with Claude and Codex side by side in Ghostty, or invite Antigravity (`agy`) as a peer. Ask from either CLI. Crosstalk reuses the other AI's pane or opens a native split, sends the question, and returns the response. No tmux required.
 
 ![Crosstalk hero](docs/hero.png)
 
@@ -22,7 +22,7 @@ Crosstalk connects existing interactive AI CLIs. Start from Codex with `$crossta
 | Claude ↔ Codex analysis and callbacks | Supported; two-way transport verified locally | Supported; Codex caller experimental |
 | Quick opinions (`ask`) | Supported | Supported |
 | Prepare peer panes | Native split or reuse in the same tab | Workspace splits through `:launch` |
-| Antigravity peer | Not supported | Supported |
+| Antigravity (`agy`) peer | Supported through the mailbox | Supported |
 | Co-work and PR review | Not yet ported | Available; deep review experimental |
 | Screen capture / screen transport | Unavailable through the Ghostty 1.3 AppleScript API | Available |
 
@@ -45,14 +45,15 @@ See the [Ghostty verification record](docs/ghostty-verification.md) for the actu
 | --- | --- | --- |
 | macOS | Both terminal backends | Use an OS version supported by your terminal app |
 | Ghostty 1.3+ | Native Claude ↔ Codex workflow | macOS AppleScript support; no cmux or tmux required |
-| Claude Code and Codex CLI | Ghostty discussion | Install and authenticate both CLIs |
+| Claude Code or Codex CLI | Discussion caller | At least one is required to start a discussion |
+| Claude, Codex, or Antigravity (`agy`) | Peer | Install and authenticate the caller and the peer you choose |
 | jq | Bridge and configuration | Required |
 | Python 3 with sqlite3 | Ghostty mailbox | Standard library only; no pip packages or server |
 | Node.js / npm | Installing npm-distributed AI CLIs | Not a separate Crosstalk runtime |
 | cmux 1.3+ | Alternative backend and advanced workflows | Optional for Ghostty discussion |
 | GitHub CLI (`gh`) | PR review | Optional |
 
-Antigravity (`agy`) is a standalone download and currently participates through cmux only.
+Antigravity (`agy`) is a standalone download. It can participate as a peer in Ghostty mailbox discussions or legacy cmux runs. Install and authenticate the CLIs you plan to use.
 
 ## Language
 
@@ -88,7 +89,7 @@ In Claude Code:
 
 ```text
 /plugin marketplace add dongsik93/crosstalk
-/plugin install crosstalk@dongsik93/crosstalk
+/plugin install crosstalk@crosstalk
 ```
 
 Then run the one-time setup:
@@ -123,6 +124,13 @@ $crosstalk Should this project use Compose or XML? Discuss it with Claude.
 /crosstalk Should this project use Compose or XML?
 ```
 
+Claude and Codex are the default pair. To use Antigravity, name it explicitly:
+
+```text
+$crosstalk Review this design with agy.
+/crosstalk Review this design with agy.
+```
+
 Crosstalk reuses a labelled peer in the same tab or creates a right split and starts the other CLI in the current directory. Finish any first-use login/trust prompts there. Once startup is acknowledged, the question is delivered and completion callbacks return to the caller.
 
 ```text
@@ -138,7 +146,55 @@ To check status without launching a peer, run `$crosstalk` or `/crosstalk` witho
 
 Crosstalk does not currently set a model or effort level. Reused panes keep their session settings; newly launched CLIs use their own defaults. Codex settings are not copied to Claude, or vice versa. There is no Crosstalk-specific model/effort override yet.
 
+### Permissions for new peer panes
+
+When the Crosstalk skill or slash command needs to create a new Ghostty peer, it offers two choices:
+
+| Choice | Behavior |
+| --- | --- |
+| Keep CLI settings (default) | Adds no permission-bypass flag; the CLI keeps its own settings |
+| Auto-approve this launch | Adds the option below for this new peer only |
+
+| Peer | Option added by `--auto-approve` |
+| --- | --- |
+| Codex | `--yolo` — bypasses approvals **and the sandbox** |
+| Claude | `--dangerously-skip-permissions` |
+| Antigravity (`agy`) | `--dangerously-skip-permissions`; still starts with `--prompt-interactive` |
+
+Auto-approval applies to all tools in that session, not just mailbox commands. The choice is not saved globally. Existing peers keep their current permissions and are reused without another choice. Changing an existing peer's mode requires an explicit user decision to restart it; the bridge will not do so automatically.
+
+Direct bridge commands do not display a choice. Without the flag, they keep CLI defaults:
+
+```sh
+~/.claude/scripts/crosstalk_bridge.sh ensure-peer codex agy
+```
+
+After explicitly choosing auto-approval for a **new** peer:
+
+```sh
+~/.claude/scripts/crosstalk_bridge.sh ensure-peer claude codex --auto-approve
+~/.claude/scripts/crosstalk_bridge.sh ensure-peer codex claude --auto-approve
+~/.claude/scripts/crosstalk_bridge.sh ensure-peer codex agy --auto-approve
+```
+
+An existing matching peer causes `--auto-approve` to be rejected. Omit the flag to reuse it; a timeout or permission prompt is not permission to relaunch with broader access.
+
 ## Ghostty setup and troubleshooting
+
+### Antigravity (`agy`) peer
+
+Ask Codex or Claude to discuss a topic with agy, or prepare and contact it directly:
+
+```sh
+~/.claude/scripts/crosstalk_bridge.sh ensure-peer codex agy
+crosstalk send agy "Review this approach" --summary "Reviewing the proposed approach"
+```
+
+From Claude, use `ensure-peer claude agy`. `agy` and `antigravity` resolve to the same peer kind. The launcher uses `agy --prompt-interactive` and preserves the caller PATH. The common permission choice above applies to agy too. Finish any login, project, or tool-approval prompts in the new pane. On timeout, reuse the pending pane instead of launching another copy.
+
+New agy panes learn the mailbox workflow at startup. For an existing manually bound agy pane, ask it to read `~/.claude/crosstalk/mailbox.md` once before sending summary notifications. agy uses the same ID-less receive and reply --summary flow; the cmux `/crosstalk-peer ... RUN_ID=...` handler remains for legacy runs. Discussion callers remain Claude or Codex.
+
+### Identification and recovery
 
 Terminal detection checks the caller's process ancestry as well as Ghostty environment variables; a missing `TERM_PROGRAM` no longer defaults to cmux. A stale socket alone is not treated as a running terminal.
 
@@ -160,7 +216,7 @@ Manual bridge commands:
 # From a Claude caller: ensure-peer claude codex
 ```
 
-This first Ghostty integration covers Claude/Codex analyze, ask, and callbacks. Advanced cowork/review flows remain cmux-oriented. Ghostty 1.3 does not expose screen contents through AppleScript, so capture, screen transport, and footer-based readiness are unavailable. Unknown existing panes need an explicit `bridge label <ID> claude|codex|shell`.
+Ghostty supports analyze, ask, and replies from Claude/Codex callers, with Claude, Codex, or Antigravity as peers. Advanced cowork/review flows remain cmux-oriented. Ghostty 1.3 does not expose screen contents through AppleScript, so capture, screen transport, and footer-based readiness are unavailable. Unknown existing panes need an explicit `bridge label <ID> claude|codex|antigravity|shell`.
 
 Long messages and responses stay in the local SQLite mailbox; Ghostty displays a one-sentence question or reply summary; protocol IDs and commands are not included in the notification. Only `receive` acknowledges receipt. No daemon, socket server, or clipboard is used. macOS may ask for Automation permission to control Ghostty. Existing file/ping runs still work for compatibility.
 
@@ -218,7 +274,7 @@ These exist for manual control or recovery — you typically don't need them.
 
 ## How It Works — Ghostty mailbox
 
-Both AI CLIs use the same shell commands:
+All supported participants use the same mailbox commands:
 
 ```sh
 crosstalk send claude "What do you think of this design?" --summary "Reviewing the proposed design"
@@ -262,7 +318,7 @@ cmux workflows and existing `RUN_ID` conversations continue using `/tmp/crosstal
 
 ## Advanced workflows — cmux
 
-Use cmux for co-work, PR review, and Antigravity peers. These workflows have not yet been ported to Ghostty.
+Use cmux for co-work and PR review. These workflows have not yet been ported to Ghostty; Antigravity mailbox discussions are supported.
 
 For PR review, run `/crosstalk:review <PR>`. The experimental `--deep` variant checks out the PR branch and attempts to restore the previous branch afterward.
 

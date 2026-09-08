@@ -13,7 +13,7 @@ BRIDGE="$HOME/.claude/scripts/crosstalk_bridge.sh"
 BACKEND=$("$BRIDGE" backend)
 ```
 
-If `BACKEND=ghostty`, run `"$BRIDGE" ensure-peer claude codex` and finish. From a Codex caller use `ensure-peer codex claude`. This creates a native right split in the current directory, or reuses the labelled peer in this tab. It waits for the peer's startup acknowledgement; on timeout, report the existing pane's login/trust prompt and do not create a duplicate. Do not execute any cmux steps below on Ghostty.
+If `BACKEND=ghostty`, run `"$BRIDGE" ensure-peer claude codex` and finish. From a Codex caller use `ensure-peer codex claude`. If the user explicitly requests agy, use `ensure-peer <caller-kind> antigravity` instead (agy is an alias). This creates a native right split in the current directory, or reuses the labelled peer in this tab. It waits for the peer's startup acknowledgement; on timeout, report the existing pane's login/trust prompt and do not create a duplicate. Do not execute any cmux steps below on Ghostty.
 
 ## cmux backend only
 
@@ -358,3 +358,5 @@ ko:
 - 본인이 unknown인 경우(셸 등) 자동 셋업 불가 — `/crosstalk:setup`으로 수동 라벨링 후 재실행.
 - AI CLI 시작 시간은 시스템에 따라 다름. 15초로 부족하면 사용자가 *완료 후 /crosstalk:setup* 으로 라벨 다시 박기.
 - 첫 실행 시 cmux/각 CLI가 OAuth 인증을 요구할 수 있음. 인증 후 `/crosstalk:setup`으로 라벨 다시 박기.
+
+Before creating any new Ghostty peer (Claude, Codex, agy), ask whether to keep its existing CLI permission settings (default) or use --auto-approve for this launch only. Codex maps to --yolo (approvals and sandbox bypass); Claude/agy map to --dangerously-skip-permissions. Apply only after explicit user choice, never because startup timed out. Do not save a global preference or change an existing peer's permissions.

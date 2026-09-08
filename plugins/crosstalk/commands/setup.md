@@ -74,7 +74,7 @@ case "$LANGUAGE" in en|ko) ;; *) LANGUAGE="en" ;; esac
 
 ## Ghostty
 
-Use `bridge list-all` and `bridge label` with `ghostty:<UUID>` IDs. Labels are stored separately and do not replace terminal titles. Ghostty has no screen preview API: for an unknown pane show its ID and ask for Claude, Codex, shell, or skip. Do not call capture/read-screen or offer Antigravity on this backend. Newly launched peers are labelled automatically by `bridge ensure-peer`.
+Use `bridge list-all` and `bridge label` with `ghostty:<UUID>` IDs. Labels are stored separately and do not replace terminal titles. Ghostty has no screen preview API: for an unknown pane show its ID and ask for Claude, Codex, Antigravity, shell, or skip. Do not call capture/read-screen. For an existing agy pane, have that CLI read ~/.claude/crosstalk/mailbox.md once to register the summary-notification workflow; do not inject a legacy RUN_ID trigger. Newly launched peers are labelled automatically by `bridge ensure-peer`.
 
 ## 동작
 

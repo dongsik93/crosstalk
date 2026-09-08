@@ -13,13 +13,13 @@ SELF=$("$BRIDGE" self)
 
 For an empty invocation, show backend, caller ID, and labelled peers. Do not launch an AI just to show status.
 
-For a topic on Ghostty, automatically prepare the requested Claude peer:
+For a topic on Ghostty, prepare the requested peer (Claude by default; set PEER_KIND=antigravity if the user explicitly requests agy):
 
 ```bash
-PEER=$("$BRIDGE" ensure-peer codex claude)
+PEER=$("$BRIDGE" ensure-peer codex "${PEER_KIND:-claude}")
 ```
 
-This reuses one labelled Claude peer in the caller's tab or splits right and launches Claude in the same directory. It waits for a real startup acknowledgement. On timeout, stop and report the existing pane's login/trust prompt; never launch another copy or bypass permissions. Then continue the requested flow automatically.
+This reuses one labelled peer in the caller's tab or splits right and launches the requested CLI in the same directory. It waits for a real startup acknowledgement. On timeout, stop and report the existing pane's login/trust prompt; never launch another copy or bypass permissions. Then continue the requested flow automatically.
 
 On cmux, keep the existing launch/setup flow if no peers exist.
 
@@ -30,3 +30,5 @@ osascript -e 'tell application "Ghostty" to get {id, name, working directory} of
 ```
 
 Ghostty uses the SQLite mailbox and send/receive/reply for new discussions. See `mailbox.md`. Existing file/ping runs can still finish. Screen capture, UI footer detection, and screen transport are unavailable. Do not call `wait-ready` or `wait-turn` on Ghostty; `ensure-peer` handles startup.
+
+Before creating any new Ghostty peer (Claude, Codex, agy), ask whether to keep its existing CLI permission settings (default) or use --auto-approve for this launch only. Codex maps to --yolo (approvals and sandbox bypass); Claude/agy map to --dangerously-skip-permissions. Apply only after explicit user choice, never because startup timed out. Do not save a global preference or change an existing peer's permissions.

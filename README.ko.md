@@ -3,11 +3,11 @@
 [English](README.md) | [한국어](README.ko.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.10.3-blue)
+![Version](https://img.shields.io/badge/version-0.10.4-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-black)
 
-Ghostty에서 Claude와 Codex를 나란히 띄워 토의하세요. 어느 CLI에서든 질문하면 Crosstalk이 상대 AI의 pane을 재사용하거나 Ghostty 화면을 분할해 실행하고, 질문과 답변을 주고받습니다. tmux는 필요 없습니다.
+Ghostty에서 Claude와 Codex를 나란히 띄워 토의하거나, Antigravity(`agy`)를 참여자로 초대하세요. 어느 CLI에서든 질문하면 Crosstalk이 상대 AI의 pane을 재사용하거나 Ghostty 화면을 분할해 실행하고, 질문과 답변을 주고받습니다. tmux는 필요 없습니다.
 
 ![Crosstalk hero](docs/hero.png)
 
@@ -22,7 +22,7 @@ Crosstalk은 기존 대화형 AI CLI를 연결합니다. Codex에서는 `$crosst
 | Claude ↔ Codex 분석 및 콜백 | 지원, 로컬에서 양방향 전달 검증 | 지원, Codex 호출자는 실험 단계 |
 | 빠른 의견 수집 (`ask`) | 지원 | 지원 |
 | 상대 pane 준비 | 같은 탭에서 자체 분할 또는 재사용 | `:launch`로 워크스페이스 분할 |
-| Antigravity 참여 | 미지원 | 지원 |
+| Antigravity (`agy`) 참여 | 메시지함으로 지원 | 지원 |
 | 공동작업 및 PR 리뷰 | 아직 미이식 | 사용 가능, 심층 리뷰는 실험 단계 |
 | 화면 캡처 / 화면 기반 전달 | Ghostty 1.3 AppleScript API에서 제공하지 않음 | 사용 가능 |
 
@@ -45,14 +45,15 @@ Crosstalk은 기존 대화형 AI CLI를 연결합니다. Codex에서는 `$crosst
 | --- | --- | --- |
 | macOS | 두 터미널 백엔드 모두 | 터미널 앱이 지원하는 OS 버전 사용 |
 | Ghostty 1.3+ | 자체 Claude ↔ Codex 토의 | macOS AppleScript 지원, cmux나 tmux 불필요 |
-| Claude Code 및 Codex CLI | Ghostty 토의 | 두 CLI 모두 설치 및 인증 필요 |
+| Claude Code 또는 Codex CLI | 토의 호출자 | 토의를 시작하려면 둘 중 하나 이상 필요 |
+| Claude, Codex 또는 Antigravity (`agy`) | 참여자 | 선택한 호출자와 참여자 CLI를 설치하고 인증 |
 | jq | 브리지 및 설정 | 필수 |
 | sqlite3가 포함된 Python 3 | Ghostty 메시지함 | 표준 라이브러리만 사용, pip 패키지나 서버 불필요 |
 | Node.js / npm | npm으로 배포되는 AI CLI 설치 | 별도의 Crosstalk 런타임은 아님 |
 | cmux 1.3+ | 대체 백엔드 및 고급 작업 | Ghostty 토의에는 선택 사항 |
 | GitHub CLI (`gh`) | PR 리뷰 | 선택 사항 |
 
-Antigravity (`agy`)는 별도로 다운로드하며, 현재 cmux에서만 참여할 수 있습니다.
+Antigravity (`agy`)는 별도로 다운로드합니다. Ghostty 메시지함과 기존 cmux 대화에서 참여자로 사용할 수 있습니다. 사용할 CLI를 설치하고 인증해 두세요.
 
 ## 언어
 
@@ -88,7 +89,7 @@ Claude Code에서 실행합니다.
 
 ```text
 /plugin marketplace add dongsik93/crosstalk
-/plugin install crosstalk@dongsik93/crosstalk
+/plugin install crosstalk@crosstalk
 ```
 
 최초 설정은 한 번만 실행하면 됩니다.
@@ -125,6 +126,13 @@ $crosstalk Should this project use Compose or XML? Discuss it with Claude.
 
 Crosstalk은 같은 탭에서 라벨이 지정된 상대 pane을 재사용하거나 오른쪽으로 분할해 현재 디렉터리에서 다른 CLI를 시작합니다. 처음 실행할 때 로그인이나 신뢰 확인이 나오면 해당 pane에서 완료하세요. 시작 확인을 받으면 질문을 전달하고, 완료 콜백은 호출자에게 돌아옵니다.
 
+기본 조합은 Claude와 Codex입니다. Antigravity와 토의하려면 agy를 명시하세요.
+
+```text
+$crosstalk Review this design with agy.
+/crosstalk Review this design with agy.
+```
+
 ```text
 Ghostty tab
 ├── Codex  ← questions and responses →  Claude
@@ -138,7 +146,55 @@ Ghostty tab
 
 현재 Crosstalk은 모델이나 effort를 지정하지 않습니다. 재사용한 pane은 기존 세션 설정을 유지하고, 새 CLI는 자체 기본값을 사용합니다. Codex 설정을 Claude에 복사하거나 그 반대로 전달하지 않습니다. Crosstalk 전용 모델/effort 재정의 옵션은 아직 없습니다.
 
+### 새 pane의 권한 선택
+
+Crosstalk 스킬이나 슬래시 명령이 새 Ghostty 참여자를 실행할 때 다음 두 가지 중에서 고릅니다.
+
+| 선택 | 동작 |
+| --- | --- |
+| CLI 설정 유지 (기본값) | 권한 우회 옵션을 추가하지 않고 해당 CLI의 설정 유지 |
+| 이번 실행만 자동승인 | 새 참여자에 한해 아래 옵션 추가 |
+
+| 참여자 | `--auto-approve`가 추가하는 옵션 |
+| --- | --- |
+| Codex | `--yolo` — 승인 **및 샌드박스** 우회 |
+| Claude | `--dangerously-skip-permissions` |
+| Antigravity (`agy`) | `--dangerously-skip-permissions`; 대화형 실행에는 `--prompt-interactive` 사용 |
+
+자동승인은 메시지함 명령뿐 아니라 해당 세션의 모든 도구에 적용됩니다. 선택을 전역 설정에 저장하지 않습니다. 이미 열린 참여자는 권한을 유지한 채 다시 묻지 않고 재사용합니다. 기존 참여자의 권한을 바꾸려면 사용자가 재시작을 명시적으로 결정해야 하며, 브리지가 자동으로 재시작하지는 않습니다.
+
+브리지를 직접 실행하면 선택 질문은 나오지 않습니다. 옵션이 없으면 CLI 기본 설정을 유지합니다.
+
+```sh
+~/.claude/scripts/crosstalk_bridge.sh ensure-peer codex agy
+```
+
+**새 참여자**의 자동승인을 명시적으로 선택했을 때만 다음과 같이 실행합니다.
+
+```sh
+~/.claude/scripts/crosstalk_bridge.sh ensure-peer claude codex --auto-approve
+~/.claude/scripts/crosstalk_bridge.sh ensure-peer codex claude --auto-approve
+~/.claude/scripts/crosstalk_bridge.sh ensure-peer codex agy --auto-approve
+```
+
+일치하는 참여자가 이미 있으면 `--auto-approve`는 거부됩니다. 기존 참여자를 재사용하려면 옵션을 빼세요. 시간 초과나 권한 확인창이 나타났다는 이유로 권한을 넓혀 다시 실행하지 않습니다.
+
 ## Ghostty 설정 및 문제 해결
+
+### Antigravity (`agy`) 참여
+
+Codex나 Claude에게 agy와 토의해 달라고 요청하거나 다음 명령으로 준비할 수 있습니다.
+
+```sh
+~/.claude/scripts/crosstalk_bridge.sh ensure-peer codex agy
+crosstalk send agy "Review this approach" --summary "Reviewing the proposed approach"
+```
+
+Claude에서는 `ensure-peer claude agy`를 사용합니다. `agy`와 `antigravity`는 같은 참여자를 가리킵니다. 런처는 `agy --prompt-interactive`로 실행하고 호출자의 PATH를 전달합니다. agy에도 앞서 설명한 공통 권한 선택을 적용합니다. 로그인·프로젝트 선택·도구 승인 창이 뜨면 해당 pane에서 완료하세요. 시간이 초과돼도 새 pane을 만들지 말고 기존 pane을 사용하세요.
+
+새 agy pane에는 시작할 때 메시지함 사용법을 전달합니다. 기존 agy pane을 수동으로 연결했다면 요약 알림을 보내기 전에 그 CLI에서 `~/.claude/crosstalk/mailbox.md`를 한 번 읽게 하세요. ID 없는 receive와 reply --summary를 사용하며, cmux의 `/crosstalk-peer ... RUN_ID=...`는 기존 대화용으로 유지합니다. 토의 시작은 Claude나 Codex에서 합니다.
+
+### 식별 및 복구
 
 터미널을 감지할 때 Ghostty 환경변수와 호출자의 상위 프로세스를 함께 확인합니다. `TERM_PROGRAM`이 없다고 cmux로 간주하지 않으며, 오래된 소켓 파일만으로 터미널이 실행 중이라고 판단하지 않습니다.
 
@@ -160,7 +216,7 @@ osascript -e 'tell application "Ghostty" to get {id, name, working directory} of
 # From a Claude caller: ensure-peer claude codex
 ```
 
-이번 Ghostty 연동은 Claude/Codex의 analyze, ask, 콜백을 지원합니다. 고급 cowork/review 작업은 아직 cmux 중심입니다. Ghostty 1.3은 AppleScript로 화면 내용을 제공하지 않으므로 캡처, 화면 기반 전달, 하단 표시를 통한 준비 상태 확인을 사용할 수 없습니다. 기존 pane의 AI 종류를 모르면 `bridge label <ID> claude|codex|shell`로 명시해야 합니다.
+Ghostty에서는 Claude/Codex가 analyze와 ask를 시작하고 Claude, Codex, Antigravity 참여자와 답변을 주고받을 수 있습니다. 고급 cowork/review 작업은 아직 cmux 중심입니다. Ghostty 1.3은 AppleScript로 화면 내용을 제공하지 않으므로 캡처, 화면 기반 전달, 하단 표시를 통한 준비 상태 확인을 사용할 수 없습니다. 기존 pane의 AI 종류를 모르면 `bridge label <ID> claude|codex|antigravity|shell`로 명시해야 합니다.
 
 긴 메시지와 답변은 로컬 SQLite 메시지함에 두고, Ghostty에는 질문이나 답변의 한 문장 요약을 보여 줍니다. 알림에 전달용 ID나 명령은 넣지 않습니다. 수신 확인은 `receive`만 처리합니다. 데몬, 소켓 서버, 클립보드는 사용하지 않습니다. macOS가 Ghostty 제어를 위한 자동화 권한을 요청할 수 있습니다. 호환성을 위해 기존 파일/ping 방식의 실행도 계속 지원합니다.
 
@@ -218,7 +274,7 @@ osascript -e 'tell application "Ghostty" to get {id, name, working directory} of
 
 ## 동작 방식: Ghostty 메시지함
 
-AI가 사용하는 도구는 어느 CLI에서나 실행할 수 있는 일반 셸 명령입니다.
+지원하는 모든 참여자는 같은 메시지함 명령을 사용합니다.
 
 ```sh
 crosstalk send claude "What do you think of this design?" --summary "Reviewing the proposed design"
@@ -262,7 +318,7 @@ cmux 작업과 기존 `RUN_ID` 대화는 계속 `/tmp/crosstalk/run-*` 아래의
 
 ## 고급 작업: cmux
 
-공동작업, PR 리뷰, Antigravity 참여에는 cmux를 사용하세요. 이 작업들은 아직 Ghostty로 이식되지 않았습니다.
+공동작업과 PR 리뷰에는 cmux를 사용하세요. 이 작업들은 아직 Ghostty로 이식되지 않았습니다. Antigravity 메시지함 토의는 Ghostty에서도 지원합니다.
 
 PR 리뷰는 `/crosstalk:review <PR>`로 실행합니다. 실험 기능인 `--deep`은 PR 브랜치를 체크아웃하고 리뷰 후 이전 브랜치 복원을 시도합니다.
 

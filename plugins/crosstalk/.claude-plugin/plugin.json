@@ -1,7 +1,7 @@
 {
   "name": "crosstalk",
-  "version": "0.10.3",
-  "description": "Claude and Codex discussions in Ghostty with a durable SQLite mailbox; advanced cmux co-work and review workflows.",
+  "version": "0.10.4",
+  "description": "Claude and Codex discussions with Claude, Codex, or Antigravity peers in Ghostty using a SQLite mailbox; legacy cmux workflows remain available.",
   "author": {
     "name": "dongsik93"
   }

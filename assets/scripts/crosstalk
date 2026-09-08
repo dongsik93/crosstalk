@@ -112,7 +112,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
     send = commands.add_parser('send')
-    send.add_argument('peer', choices=['claude', 'codex'])
+    send.add_argument('peer', type=lambda value: 'antigravity' if value == 'agy' else value, choices=['claude', 'codex', 'antigravity'])
     send.add_argument('text', nargs='?')
     send.add_argument('--stdin', action='store_true')
     send.add_argument('--summary', default='', help='One-sentence display summary; not used for routing')

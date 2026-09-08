@@ -258,7 +258,7 @@ case "$CMD" in
 
   launch)
     [ "$(terminal_backend)" = ghostty ] || { echo "Use /crosstalk:launch for cmux." >&2; exit 1; }
-    ghostty_launch "${1:?peer kind required (claude|codex)}"
+    ghostty_launch "$@"
     ;;
 
   ensure-peer)
@@ -268,7 +268,12 @@ case "$CMD" in
       claude) WANT="${2:-codex}" ;;
       *) echo "ERROR: caller must be claude or codex" >&2; exit 1 ;;
     esac
-    case "$WANT" in claude|codex) ;; *) echo "ERROR: peer must be claude or codex" >&2; exit 1 ;; esac
+    [ "$WANT" != agy ] || WANT=antigravity
+    APPROVAL="${3:-}"
+    if [ "$#" -gt 3 ] || { [ -n "$APPROVAL" ] && [ "$APPROVAL" != --auto-approve ]; }; then
+      echo "ERROR: ensure-peer <caller> <peer> [--auto-approve]" >&2; exit 1
+    fi
+    case "$WANT" in claude|codex|antigravity) ;; *) echo "ERROR: peer must be claude, codex, or antigravity (agy)" >&2; exit 1 ;; esac
     [ "$CALLER" != "$WANT" ] || { echo "ERROR: choose the other CLI kind" >&2; exit 1; }
     SELF=$(self_surface)
     "$0" label "$SELF" "$CALLER" >/dev/null
@@ -277,10 +282,11 @@ case "$CMD" in
     COUNT=$(printf '%s\n' "$MATCHES" | awk 'NF {n++} END {print n+0}')
     [ "$COUNT" -le 1 ] || { echo "ERROR: multiple $WANT peers in this tab; select one explicitly" >&2; exit 1; }
     if [ "$COUNT" -eq 1 ]; then
+      [ -z "$APPROVAL" ] || { echo "ERROR: existing peer permissions cannot be changed; reuse without --auto-approve" >&2; exit 1; }
       if [[ "$MATCHES" = ghostty:* ]]; then ghostty_wait_ready "$MATCHES"; fi
       echo "$MATCHES"
     elif [[ "$SELF" = ghostty:* ]]; then
-      ghostty_launch "$WANT"
+      ghostty_launch "$WANT" "$APPROVAL"
     else
       echo "ERROR: no $WANT peer; run /crosstalk:launch in cmux" >&2
       exit 1
@@ -326,7 +332,6 @@ case "$CMD" in
       *) echo "ERROR: invalid kind '$KIND' (use claude/codex/antigravity/shell)" >&2; exit 1 ;;
     esac
     if [[ "$SURFACE" = ghostty:* ]]; then
-      case "$KIND" in claude|codex|shell) ;; *) echo "ERROR: Ghostty supports Claude/Codex only" >&2; exit 1 ;; esac
       ghostty_label "$SURFACE" "$KIND"
     else
       cmux rename-tab --surface "$SURFACE" "ct-${KIND}" >/dev/null

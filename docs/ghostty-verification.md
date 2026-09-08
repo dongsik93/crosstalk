@@ -73,3 +73,13 @@ Notifications now contain a question/reply summary, not a protocol ID, path or c
 A live adjacent Claude pane processed two queued questions (`2 + 3` and `7 × 8`). Codex received the visible summaries “2 + 3은 5입니다.” and “7 × 8은 56입니다.”, then called ID-less receive. Each full reply contained its expected result marker and referenced the correct original request. A further receive returned actionable=false. Existing messages were preserved by the additive summary-column migration.
 
 The mailbox regression test covers legacy-database migration, concurrent ID-less receipt, multiple recipient queues, equal timestamps, identical summaries with different bodies, matching reply_to/thread_id, repeated wake-ups, summary length/control characters and old ID-bearing notifications. No extra SDK, model call, daemon or polling service was added. Normal CLI tool traces may still be visible.
+
+## v0.10.4 — Antigravity peer and per-launch permissions (2026-09-09)
+
+The installed agy CLI advertised `--prompt-interactive`; the Ghostty launcher used it to open an adjacent Antigravity pane with the caller PATH and exact terminal binding. No permission-bypass flag was added. Startup acknowledgement succeeded. The peer received a summary notification, read the mailbox request, and returned `AGY_GHOSTTY_OK`, `result=156`, and a human-readable summary for `12 × 13`. Tool permission prompts occurred and were approved interactively; this is not evidence of unattended operation.
+
+Callers remain Claude or Codex. Both `agy` and `antigravity` resolve to the Antigravity peer. Existing manually bound agy panes must read the shared mailbox instructions once; the legacy cmux file handler is unchanged.
+
+New-peer workflows now offer the existing CLI permission settings (default) or an explicit per-launch `--auto-approve` choice. The opt-in maps to Codex `--yolo` (approval and sandbox bypass) and Claude/agy `--dangerously-skip-permissions`. It is not stored as a global preference. Existing peers reject permission-mode changes through ensure-peer.
+
+The bridge test executes generated scripts against fake Claude/Codex/agy launchers and asserts exact default and opt-in argv, agy's interactive flag, alias normalization, binding, and cleanup. Mailbox tests cover both Claude and Codex sending to an agy peer and receiving the correctly linked reply. Opt-in modes were not enabled in live sessions for this test. CLI help confirmed the actual flags, including Codex's accepted --yolo alias.

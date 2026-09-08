@@ -19,7 +19,7 @@ Skill files such as `mailbox.md` describe the workflow; they are not message tra
 
 This is a dispatcher. Do not inline every workflow from memory. Read exactly one flow file from this skill directory before acting:
 
-- `launch [claude]`: read `readiness.md` and run `bridge ensure-peer codex claude`.
+- `launch [claude|agy|antigravity]`: read `readiness.md` and run `bridge ensure-peer codex <requested-peer>` (default claude).
 - No arguments: read `readiness.md`.
 - Plain topic on cmux: read `analyze.md`.
 - `analyze ...` on cmux: read `analyze.md`.

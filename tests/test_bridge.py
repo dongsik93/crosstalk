@@ -136,14 +136,19 @@ else: print('1 /Applications/' + name + '.app/Contents/MacOS/' + name)
     runtime = root / 'ct-test-runtime'
     runtime.write_text('#!/bin/sh\nexec ' + subprocess.check_output(['which', 'python3'], text=True).strip() + ' "$@"\n')
     runtime.chmod(0o755)
-    for kind in ('codex', 'claude'):
-        cli = root / kind
+    for kind in ('codex', 'claude', 'antigravity', 'agy'):
+        cli = root / ('agy' if kind in ('antigravity','agy') else kind)
         cli.write_text('''#!/usr/bin/env ct-test-runtime
 import json, os, re, subprocess, sys
 from pathlib import Path
 assert os.environ['CROSSTALK_SURFACE_ID'].startswith('ghostty:')
-assert len(sys.argv)==2
-prompt = sys.argv[1]
+if Path(sys.argv[0]).name == 'agy':
+    expected = ['--dangerously-skip-permissions','--prompt-interactive'] if os.environ.get('TEST_AUTO_APPROVE')=='1' else ['--prompt-interactive']
+    assert sys.argv[1:-1]==expected
+else:
+    flag = '--yolo' if Path(sys.argv[0]).name=='codex' else '--dangerously-skip-permissions'
+    assert sys.argv[1:-1] == ([flag] if os.environ.get('TEST_AUTO_APPROVE')=='1' else [])
+prompt = sys.argv[-1]
 ack = re.search(r'Run exactly: (.*?) [.] Then say', prompt).group(1)
 Path(os.environ['TEST_LAUNCH_RESULT']).write_text(json.dumps({'id': os.environ['CROSSTALK_SURFACE_ID'], 'prompt': prompt}))
 subprocess.run(['/bin/bash', '-c', ack], check=True)
@@ -159,6 +164,14 @@ subprocess.run(['/bin/bash', '-c', ack], check=True)
         assert split[3].startswith('/bin/bash ') and '/bin/bash -c ' not in split[3]
         assert split[4] == env['PATH']
         assert not list(scratch.glob('crosstalk-ready.*'))
+    run('launch','agy','--unknown',ok=False)
+    run('ensure-peer','codex','agy','--auto-approve',ok=False)  # cannot upgrade an existing peer
+    for kind in ('codex','claude','agy'):
+        assert run('launch',kind,'--auto-approve',TEST_LAUNCH='1',TEST_AUTO_APPROVE='1',READY_MAX_WAIT='10',TMPDIR=str(scratch),TEST_LAUNCH_RESULT=str(result)) == f'ghostty:{B}'
+    run('launch','agy','--auto-approve','extra',ok=False)
+    assert run('detect', f'ghostty:{B}') == 'antigravity'
+    assert run('ensure-peer', 'codex', 'agy') == f'ghostty:{B}'
+    assert run('ensure-peer', 'claude', 'antigravity') == f'ghostty:{B}'
     alive.write_text(json.dumps([A]))
     run('send', f'ghostty:{B}', 'closed', ok=False)
     run('self', CROSSTALK_SURFACE_ID=f'ghostty:{B}', ok=False)

@@ -141,15 +141,32 @@ ghostty_get_label() {
   ghostty_rpc exists "$id" >/dev/null || return
   path=$(ghostty_label_path "$1") || return
   kind=$(cat "$path" 2>/dev/null || true)
-  case "$kind" in claude|codex|shell) printf '%s\n' "$kind" ;; esac
+  case "$kind" in claude|codex|antigravity|shell) printf '%s\n' "$kind" ;; esac
 }
 
 ghostty_launch() {
-  local kind="${1:?kind required}" self id binary ready prompt command child binding launcher max_wait
-  case "$kind" in claude|codex) ;; *) echo "ERROR: Ghostty launch supports claude or codex" >&2; return 1 ;; esac
+  local kind="${1:?kind required}" self id binary ready prompt command child binding launcher max_wait executable
+  local cli_args=()
+  local approval="${2:-}"
+  if [ "$#" -gt 2 ] || { [ -n "$approval" ] && [ "$approval" != --auto-approve ]; }; then
+    echo "ERROR: usage: launch <kind> [--auto-approve]" >&2; return 1
+  fi
+  [ "$kind" != agy ] || kind=antigravity
+  case "$kind" in
+    claude|codex) executable="$kind" ;;
+    antigravity) executable=agy; cli_args=(--prompt-interactive) ;;
+    *) echo "ERROR: Ghostty launch supports claude, codex, or antigravity (agy)" >&2; return 1 ;;
+  esac
+  if [ "$approval" = --auto-approve ]; then
+    case "$kind" in
+      codex) cli_args=(--yolo) ;;
+      claude) cli_args=(--dangerously-skip-permissions) ;;
+      antigravity) cli_args=(--dangerously-skip-permissions --prompt-interactive) ;;
+    esac
+  fi
   max_wait="${READY_MAX_WAIT:-60}"
   validate_positive_int "$max_wait" READY_MAX_WAIT || return
-  binary=$(command -v "$kind") || { echo "ERROR: $kind is not installed" >&2; return 1; }
+  binary=$(command -v "$executable") || { echo "ERROR: $kind is not installed" >&2; return 1; }
   self=$(self_surface) || return
   id=$(ghostty_id "$self") || return
   ready=$(mktemp "${TMPDIR:-/tmp}/crosstalk-ready.XXXXXXXX") || return
@@ -162,7 +179,9 @@ ghostty_launch() {
   # Keep the program in a private script: Ghostty only parses an executable and one path.
   (umask 077
     printf '#!/bin/bash\nset -euo pipefail\n' > "$launcher"
-    printf 'for i in {1..100}; do if [ -s %q ]; then export CROSSTALK_SURFACE_ID="$(cat %q)"; rm -f %q "$0"; exec %q %q; fi; sleep 0.1; done; echo "Crosstalk launch binding timed out" >&2; rm -f "$0"; exit 1\n' "$binding" "$binding" "$binding" "$binary" "$prompt" >> "$launcher"
+    printf 'for i in {1..100}; do if [ -s %q ]; then export CROSSTALK_SURFACE_ID="$(cat %q)"; rm -f %q "$0"; exec ' "$binding" "$binding" "$binding" >> "$launcher"
+    printf '%q ' "$binary" ${cli_args[@]+"${cli_args[@]}"} "$prompt" >> "$launcher"
+    printf '; fi; sleep 0.1; done; echo "Crosstalk launch binding timed out" >&2; rm -f "$0"; exit 1\n' >> "$launcher"
   )
   printf -v command '/bin/bash %q' "$launcher"
   child=$(ghostty_rpc split "$id" "$PWD" "$command" "$PATH") || { rm -f "$ready" "$launcher"; return 1; }

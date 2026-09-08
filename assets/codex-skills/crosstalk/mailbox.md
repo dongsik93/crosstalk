@@ -1,10 +1,14 @@
-# Ghostty mailbox — Claude ↔ Codex
+# Ghostty mailbox — Claude, Codex, and Antigravity peers
 
 This is the default Ghostty analyze/ask workflow. Use the executable `~/.claude/scripts/crosstalk` (also installed as `~/.local/bin/crosstalk`). The tool stores message bodies and status in SQLite. Do not create per-message MD files, response paths, manifests, or done markers, and do not call `bridge ping` for mailbox messages.
 
+Antigravity (`agy`) can receive and reply as a Ghostty peer. When handling an incoming notification in agy, go straight to the receipt section; do not start another discussion or use legacy RUN_ID/ping. New agy panes receive these instructions at startup. For an existing manually bound agy pane, have that CLI read this file once before sending summary notifications. Keep tool approvals unless the user explicitly chooses the per-launch option below.
+
 ## Starting a discussion
 
-1. Determine your own CLI kind from the calling environment (Codex or Claude). Use bridge `self` and `label <self> <kind>`; then `ensure-peer <self-kind> <other-kind>`. If self cannot be identified, preserve the raw topic with bridge `pending-save` and show the error. Stop on preparation errors rather than guessing a pane or creating another copy after timeout.
+Callers remain Claude or Codex. If the user explicitly requests agy/Antigravity as the participant, use `antigravity` (alias `agy`) as the target in both `ensure-peer` and `send`. Otherwise keep the usual Claude↔Codex default. The launch command for agy is `agy --prompt-interactive <startup prompt>`.
+
+1. Apply the new-peer permission choice below if a new pane is needed. Determine your own CLI kind from the calling environment (Codex or Claude). Use bridge `self` and `label <self> <kind>`; then `ensure-peer <self-kind> <other-kind>`. If self cannot be identified, preserve the raw topic with bridge `pending-save` and show the error. Stop on preparation errors rather than guessing a pane or creating another copy after timeout.
 2. Preserve the user's raw topic. For analyze, read `~/.claude/crosstalk/config.json`: language defaults to en, active_rules and active_persona to default. Explicit --rules/--persona override those names. Read the matching `~/.claude/crosstalk/rules/<language>/<name>.md` and `personas/<language>/<name>.md`, and include their contents verbatim after the raw topic. A name of none or a missing preset omits that section. `ask` remains a single independent opinion per pane.
 3. Send the topic to the other CLI. Use `--stdin` for long text, using a quoted heredoc to avoid shell expansion:
 
@@ -18,6 +22,19 @@ From Claude, substitute `codex`. For quick opinions append `--mode ask`. Choose 
 
 4. Retain the returned `id` and `thread_id`. Analyze the original question independently and print your own view before processing the peer's reply. Then end the turn; a short terminal notification arrives when the reply is stored. For `ask`, print your answer and finish; no reply notification is sent back to the caller.
 5. If the tool fails but prints `saved: true`, the message already exists. Use `retry <id>` to resend its notification. Do not repeat `send` with a new ID. For an interrupted send where the result may be lost, inspect `status` first; callers can also supply a stable `--id` when sending.
+
+
+### New-peer permission choice
+
+Before creating any new Ghostty peer, offer the user two options: keep the CLI's existing permission settings (recommended), or auto-approve for this launch only. The latter affects all tools, not just Crosstalk. Codex YOLO also disables its sandbox. Never infer consent from a timeout or repeated approval prompts, and do not save a global preference. If the user already specified a mode for this launch, use it without asking again. If no choice is available, keep the CLI defaults.
+
+Only after explicit selection, call `bridge ensure-peer <caller> <peer> --auto-approve`. It maps to:
+
+- Codex: `--yolo` (bypass approvals and sandbox).
+- Claude: `--dangerously-skip-permissions`.
+- Antigravity: `--dangerously-skip-permissions --prompt-interactive`.
+
+Without the flag, no bypass option is added. Existing peers are reused without asking again; their running permission mode is not changed. The bridge rejects attempts to change an existing peer with --auto-approve. Do not terminate/relaunch a peer to change permissions without the user's instruction.
 
 ## Incoming summary notification
 
