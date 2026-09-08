@@ -19,7 +19,8 @@ with tempfile.TemporaryDirectory() as tmp:
 import json, os, sys
 actor=os.environ['TEST_ACTOR']
 cmd=sys.argv[1]
-if cmd=='self': print(actor)
+if cmd=='get-language': print(os.environ.get('TEST_LANGUAGE','en'))
+elif cmd=='self': print(actor)
 elif cmd=='list-peers':
     print({B!r}+'\\tclaude' if actor=={A!r} else {A!r}+'\\tcodex')
 elif cmd=='send':
@@ -38,11 +39,21 @@ else: sys.exit(1)
         assert (result.returncode == 0) == ok, (args, result.stdout, result.stderr)
         return json.loads(result.stdout) if result.stdout else None
 
+    # Migrate an existing database without losing an unread legacy message.
+    state = root / 'state'
+    state.mkdir()
+    database = state / 'mailbox.sqlite3'
+    with sqlite3.connect(database) as conn:
+        conn.execute("CREATE TABLE messages (id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, reply_to TEXT UNIQUE REFERENCES messages(id), sender TEXT NOT NULL, recipient TEXT NOT NULL, body TEXT NOT NULL, mode TEXT NOT NULL, round INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at TEXT NOT NULL, received_at TEXT, notify_error TEXT)")
+        conn.execute("INSERT INTO messages(id,thread_id,sender,recipient,body,mode,round,created_at) VALUES(?,?,?,?,?,'analyze',1,'2026-09-01')", ('legacy','legacy',A,B,'preserved legacy body'))
+    database.chmod(0o600)
+    legacy = call(B,'receive')
+    assert legacy['id']=='legacy' and legacy['body']=='preserved legacy body' and legacy['summary']==''
     payload = '한글 "quotes" \\ $HOME $(touch NEVER) `echo nope`\n' * 5000
-    first = call(A, 'send', 'claude', '--stdin', '--id', 'test-first', text=payload)
+    first = call(A, 'send', 'claude', '--stdin', '--id', 'test-first', '--summary', 'Long question summary', text=payload)
     mid = first['id']
     assert first['saved'] and first['status'] == 'pending'
-    assert len(json.loads(log.read_text().splitlines()[-1])[1]) < 1000
+    assert json.loads(log.read_text().splitlines()[-1]) == [B, '[Crosstalk] Question: Long question summary']
     assert payload not in log.read_text()
     assert call(A, 'send', 'claude', '--stdin', '--id', mid, text=payload)['id'] == mid
     call(A, 'send', 'claude', 'changed', '--id', mid, ok=False)
@@ -50,7 +61,7 @@ else: sys.exit(1)
     call(C, 'receive', mid, ok=False)
     call(A, 'receive', mid, ok=False)
     # Atomic receipt: concurrent notification handlers get the body exactly once.
-    procs = [subprocess.Popen([str(CLI), 'receive', mid], env=env | {'TEST_ACTOR': B},
+    procs = [subprocess.Popen([str(CLI), 'receive'], env=env | {'TEST_ACTOR': B},
                               text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE) for _ in range(2)]
     results=[]
     for proc in procs:
@@ -97,6 +108,40 @@ else: sys.exit(1)
     assert len(log.read_text().splitlines())==before
     assert call(B,'receive',ask_reply['id'])['body']=='ask answer'
     assert not call(B,'receive')['actionable']
+    # All wake-ups look alike: choose the correct recipient's rows in insertion order.
+    other = call(B, 'send', 'codex', 'other recipient', '--id', 'queue-other')
+    queued = []
+    for mid, body in [('queue-z','첫 번째 질문'), ('queue-a','second "quoted" question'), ('queue-m','third\nquestion')]:
+        queued.append((call(A,'send','claude',body,'--id',mid, TEST_LANGUAGE='ko')['id'], body))
+    assert json.loads(log.read_text().splitlines()[-1]) == [B, '[Crosstalk] 질문: third question']
+    # Equal or regressing wall-clock timestamps must not reorder queued messages.
+    with sqlite3.connect(root/'state/mailbox.sqlite3') as conn:
+        conn.execute("UPDATE messages SET created_at='2000-01-01' WHERE id LIKE 'queue-%'")
+    for mid, body in queued:
+        item = call(B, 'receive')
+        assert item['id']==mid and item['body']==body and item['thread_id']==mid
+        assert item['sender']==A and item['recipient']==B and item['actionable']
+        assert not call(B,'receive',mid)['actionable']  # old ID-bearing wake-ups remain safe
+    assert not call(B,'receive')['actionable']  # duplicate generic wake-up
+    assert call(A,'receive')['id']==other['id']
+    answer = call(B,'reply',queued[1][0],'answer to the second question')
+    received = call(A,'receive')
+    assert received['id']==answer['id'] and received['reply_to']==queued[1][0]
+    assert received['thread_id']==queued[1][0] and received['body']=='answer to the second question'
+    # Identical display summaries still route two distinct requests and exact bodies.
+    summary = '같은 요약'
+    one = call(A,'send','claude','body one','--summary',summary)
+    two = call(A,'send','claude','body two','--summary',summary)
+    assert call(B,'receive')['id']==one['id']
+    assert call(B,'receive')['id']==two['id']
+    assert call(A,'history',one['id'])[0]['body']=='body one'
+    assert call(A,'history',two['id'])[0]['body']=='body two'
+    control = call(A,'send','claude','full body remains intact','--summary','line 1\n\x1b[31m' + '긴' * 200)
+    assert call(B,'receive')['body']=='full body remains intact'
+    for target, text in map(json.loads,log.read_text().splitlines()):
+        assert text.startswith('[Crosstalk] ') and len(text) < 200
+        assert ' — Run ' not in text and str(CLI) not in text
+        assert all(c.isprintable() for c in text)
     call(A,'send','claude','   ',ok=False)
     call(A,'send','claude','body','--id','../../bad',ok=False)
     call(A,'receive','--replay',ok=False)
@@ -106,4 +151,5 @@ else: sys.exit(1)
     assert db.stat().st_mode & 0o077 == 0
     with sqlite3.connect(db) as conn:
         assert conn.execute('PRAGMA integrity_check').fetchone()[0]=='ok'
+        assert conn.execute('SELECT summary FROM messages WHERE id=?',('test-first',)).fetchone()[0]=='Long question summary'
 print('PASS: mailbox persistence, concurrent receipt, idempotency, authorization, replies, retry, 10 rounds, ask, reverse caller')

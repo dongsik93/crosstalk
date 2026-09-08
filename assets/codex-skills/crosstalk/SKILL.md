@@ -9,6 +9,8 @@ Use this skill when the user invokes `$crosstalk` or asks Codex to run Crosstalk
 
 ## Route first
 
+- Incoming `[Crosstalk] 질문:/답변:/Question:/Reply:` summary: read `mailbox.md`, then use ID-less `receive`. The preview is display-only; process the returned DB row and drain pending messages one at a time.
+
 - Incoming `[crosstalk] mailbox <ID>`: read `mailbox.md`. Call `~/.claude/scripts/crosstalk receive <ID>` and use `reply` for requests. Never call `start-run` or `ping` for mailbox messages.
 - New topic, `analyze`, or `ask`: check `~/.claude/scripts/crosstalk_bridge.sh backend`. On Ghostty, read `mailbox.md` and use `~/.claude/scripts/crosstalk send/receive/reply`. On cmux, use the legacy flow files below.
 - No topic, launch, status, resume, cowork, or an explicit legacy `RUN_ID` trigger: use the matching entry below.

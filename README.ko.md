@@ -3,7 +3,7 @@
 [English](README.md) | [한국어](README.ko.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.10.2-blue)
+![Version](https://img.shields.io/badge/version-0.10.3-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-black)
 
@@ -162,7 +162,7 @@ osascript -e 'tell application "Ghostty" to get {id, name, working directory} of
 
 이번 Ghostty 연동은 Claude/Codex의 analyze, ask, 콜백을 지원합니다. 고급 cowork/review 작업은 아직 cmux 중심입니다. Ghostty 1.3은 AppleScript로 화면 내용을 제공하지 않으므로 캡처, 화면 기반 전달, 하단 표시를 통한 준비 상태 확인을 사용할 수 없습니다. 기존 pane의 AI 종류를 모르면 `bridge label <ID> claude|codex|shell`로 명시해야 합니다.
 
-긴 메시지와 답변은 로컬 SQLite 메시지함에 두고, Ghostty에는 메시지 ID가 담긴 짧은 알림만 보냅니다. 수신 확인은 `receive`만 처리합니다. 데몬, 소켓 서버, 클립보드는 사용하지 않습니다. macOS가 Ghostty 제어를 위한 자동화 권한을 요청할 수 있습니다. 호환성을 위해 기존 파일/ping 방식의 실행도 계속 지원합니다.
+긴 메시지와 답변은 로컬 SQLite 메시지함에 두고, Ghostty에는 질문이나 답변의 한 문장 요약을 보여 줍니다. 알림에 전달용 ID나 명령은 넣지 않습니다. 수신 확인은 `receive`만 처리합니다. 데몬, 소켓 서버, 클립보드는 사용하지 않습니다. macOS가 Ghostty 제어를 위한 자동화 권한을 요청할 수 있습니다. 호환성을 위해 기존 파일/ping 방식의 실행도 계속 지원합니다.
 
 격리된 터미널 및 메시지함 검사는 `python3 tests/test_bridge.py`와 `python3 tests/test_mailbox.py`로 실행합니다.
 
@@ -221,9 +221,9 @@ osascript -e 'tell application "Ghostty" to get {id, name, working directory} of
 AI가 사용하는 도구는 어느 CLI에서나 실행할 수 있는 일반 셸 명령입니다.
 
 ```sh
-crosstalk send claude "What do you think of this design?"
+crosstalk send claude "What do you think of this design?" --summary "Reviewing the proposed design"
 crosstalk receive
-crosstalk reply <MESSAGE_ID> "My analysis..."
+crosstalk reply <MESSAGE_ID> "My analysis..." --summary "The design needs an explicit invalidation rule"
 ```
 
 Claude가 호출자라면 수신 대상을 `codex`로 지정합니다. 준비 상태 점검에서 먼저 `bridge ensure-peer`로 상대를 준비합니다. `send`를 실행하려면 현재 탭에 라벨이 지정된 상대 pane이 정확히 하나 있어야 합니다. `~/.local/bin`이 PATH에 없으면 `~/.claude/scripts/crosstalk`을 직접 사용하세요. 긴 본문은 명령 인자 대신 `--stdin`으로 파이프 입력할 수 있습니다.
@@ -239,6 +239,8 @@ request: pending → received → replied
 ```
 
 도구는 답변에서 명시적인 판정 표식을 추출합니다. 표식은 상대의 입장을 나타냅니다. 호출자는 두 의견을 비교한 뒤에 합의 여부를 판단해야 합니다. `send --mode ask`에서는 답변을 저장하고 상대 pane에 출력하지만 호출자에게 답변 알림을 보내지 않습니다.
+
+보내는 AI가 `--summary`로 한 문장 요약을 함께 작성합니다. 별도 모델 호출은 없으며, 요약이 없으면 본문 앞부분을 보여 줍니다. 미리보기는 최대 160자입니다. 수신 AI는 ID 없는 `receive`로 자기 pane의 미수신 메시지를 저장 순서대로 하나씩 처리합니다. 요약으로 메시지를 추측하지 않고 SQLite가 반환한 원문과 ID로 답하며, 사용자에게는 실제 질문과 답변을 보여 줍니다. 기존 ID 포함 알림도 계속 지원합니다. CLI 자체가 표시하는 도구 실행 내역까지 숨기지는 않습니다.
 
 ### 복구
 

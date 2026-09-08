@@ -157,7 +157,7 @@ ghostty_launch() {
   launcher="$ready.launch"
   # The first real AI turn acknowledges startup; a title/label alone is not readiness.
   printf -v prompt 'printf ready > %q' "$ready"
-  prompt="Crosstalk startup check. Run exactly: $prompt . Then say Crosstalk ready and finish this turn. Do not modify project files. Later [crosstalk] mailbox messages tell you to run crosstalk receive ID and reply ID; use those tools without MD files or ping. Legacy messages may still name task files."
+  prompt="Crosstalk startup check. Run exactly: $prompt . Then say Crosstalk ready and finish this turn. Do not modify project files. For later [Crosstalk] Question/Reply or 질문/답변 previews, read ~/.claude/crosstalk/mailbox.md and run ~/.claude/scripts/crosstalk receive without an ID. Process only the returned body and use its returned ID for reply --summary. Drain pending messages one at a time. Do not answer the preview directly or print protocol IDs. Legacy messages may still name task files."
   # The child waits for its exact ID before starting the CLI (same cwd is now ambiguous).
   # Keep the program in a private script: Ghostty only parses an executable and one path.
   (umask 077

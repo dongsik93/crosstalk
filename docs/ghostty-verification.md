@@ -65,3 +65,11 @@ A diagnostic Ghostty command inherited a PATH without `/opt/homebrew/bin`; the i
 The launcher now gives Ghostty `/bin/bash <private-script-path>` instead of a nested `bash -c` program, and passes the caller PATH through surface configuration. The script still waits for its exact terminal ID before starting the CLI.
 
 The regression test executes the generated startup script with fake Claude/Codex launchers whose interpreter is available only on the supplied PATH. It covers paths with spaces and apostrophes, exact binding propagation, acknowledgement, and temporary-file cleanup. The automated regression test opens no Ghostty windows. After the user explicitly requested an adjacent-pane test, the production launcher opened Codex beside the existing caller in the same tab. Codex executed the readiness acknowledgement successfully. The owned test pane was then closed; no additional standalone window was created for this live test.
+
+## v0.10.3 — display summaries and ID-less receipt (2026-09-09)
+
+Notifications now contain a question/reply summary, not a protocol ID, path or command. The sender provides `--summary`; without it the tool displays a bounded excerpt. Summaries are display-only. ID-less receive atomically selects the recipient's next pending row in insertion order and returns the full body and routing IDs.
+
+A live adjacent Claude pane processed two queued questions (`2 + 3` and `7 × 8`). Codex received the visible summaries “2 + 3은 5입니다.” and “7 × 8은 56입니다.”, then called ID-less receive. Each full reply contained its expected result marker and referenced the correct original request. A further receive returned actionable=false. Existing messages were preserved by the additive summary-column migration.
+
+The mailbox regression test covers legacy-database migration, concurrent ID-less receipt, multiple recipient queues, equal timestamps, identical summaries with different bodies, matching reply_to/thread_id, repeated wake-ups, summary length/control characters and old ID-bearing notifications. No extra SDK, model call, daemon or polling service was added. Normal CLI tool traces may still be visible.

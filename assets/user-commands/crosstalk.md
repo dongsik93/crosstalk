@@ -6,6 +6,8 @@ argument-hint: <분석 주제>
 
 # /crosstalk
 
+Incoming `[Crosstalk] 질문:/답변:/Question:/Reply:` previews: read `~/.claude/crosstalk/mailbox.md` and call ID-less `receive`. Do not answer the preview directly or infer an ID from it. Process the actual DB row, then check for the next pending message.
+
 For an incoming `[crosstalk] mailbox <ID>` notification, read `~/.claude/crosstalk/mailbox.md` and handle it without starting a new run.
 
 Use the full `$ARGUMENTS` as the raw topic. Preserve its wording.

@@ -3,7 +3,7 @@
 English | [한국어](README.ko.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.10.2-blue)
+![Version](https://img.shields.io/badge/version-0.10.3-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-black)
 
@@ -162,7 +162,7 @@ Manual bridge commands:
 
 This first Ghostty integration covers Claude/Codex analyze, ask, and callbacks. Advanced cowork/review flows remain cmux-oriented. Ghostty 1.3 does not expose screen contents through AppleScript, so capture, screen transport, and footer-based readiness are unavailable. Unknown existing panes need an explicit `bridge label <ID> claude|codex|shell`.
 
-Long messages and responses stay in the local SQLite mailbox; Ghostty receives a short notification containing the message ID. Only `receive` acknowledges receipt. No daemon, socket server, or clipboard is used. macOS may ask for Automation permission to control Ghostty. Existing file/ping runs still work for compatibility.
+Long messages and responses stay in the local SQLite mailbox; Ghostty displays a one-sentence question or reply summary; protocol IDs and commands are not included in the notification. Only `receive` acknowledges receipt. No daemon, socket server, or clipboard is used. macOS may ask for Automation permission to control Ghostty. Existing file/ping runs still work for compatibility.
 
 Run `python3 tests/test_bridge.py` and `python3 tests/test_mailbox.py` for isolated terminal and mailbox checks.
 
@@ -221,15 +221,15 @@ These exist for manual control or recovery — you typically don't need them.
 Both AI CLIs use the same shell commands:
 
 ```sh
-crosstalk send claude "What do you think of this design?"
+crosstalk send claude "What do you think of this design?" --summary "Reviewing the proposed design"
 crosstalk receive
-crosstalk reply <MESSAGE_ID> "My analysis..."
+crosstalk reply <MESSAGE_ID> "My analysis..." --summary "The design needs an explicit invalidation rule"
 ```
 
 Use `codex` as the destination when Claude is the caller. Readiness prepares the peer first with `bridge ensure-peer`; `send` requires exactly one labelled peer in the current tab. If `~/.local/bin` is not in PATH, use `~/.claude/scripts/crosstalk` directly. Long bodies can be piped via `--stdin` instead of passed as command arguments.
 
 1. **Send** stores the body in `~/.claude/crosstalk/mailbox.sqlite3`, then notifies the peer using its exact Ghostty terminal ID.
-2. **Receive** atomically claims one pending message and returns its body as JSON. Duplicate notifications return `actionable: false`; they do not instruct the AI to process the request twice.
+2. **Receive** without an ID atomically claims the next pending message for this terminal in insertion order and returns its full body and IDs as JSON. Duplicate notifications return `actionable: false`; they do not instruct the AI to process the request twice.
 3. **Reply** stores and links the answer, marks the request replied, and notifies the original caller. The AI does not write response files or call ping.
 4. **Compare**: the caller reads the reply, compares it against its own view, and summarizes or sends a follow-up with `send <peer> --thread <ROOT_ID>`. The tool enforces a maximum of 10 request/reply rounds per thread.
 
@@ -239,6 +239,8 @@ request: pending → received → replied
 ```
 
 The tool extracts explicit verdict markers from replies. A marker describes the peer's position; the caller still compares both views before claiming consensus. With `send --mode ask`, the answer is stored and printed in the peer pane, but no reply notification is sent to the caller.
+
+The sending AI provides `--summary`; no extra model call is made. Missing summaries fall back to a body excerpt. Notifications are limited to 160 preview characters and remain display-only: the receiving AI drains its pending messages one at a time and replies using IDs returned by SQLite, never by matching preview text. It displays the actual questions and answers after reading them. Old ID-bearing notifications still work. CLI-controlled tool traces may remain visible.
 
 ### Recovery
 

@@ -6,6 +6,8 @@ argument-hint: <분석 주제 / 자료 본문>
 
 # /crosstalk:analyze (사회자 없는 독립 분석 + 조건부 핑퐁)
 
+Incoming `[Crosstalk] 질문:/답변:/Question:/Reply:` previews: read `~/.claude/crosstalk/mailbox.md` and call ID-less `receive`. Do not answer the preview directly or infer an ID from it. Process the actual DB row, then check for the next pending message.
+
 For a new Ghostty request (bridge `backend` returns `ghostty`) or an incoming `[crosstalk] mailbox <ID>`, read `~/.claude/crosstalk/mailbox.md` and use that send/receive/reply workflow instead of the legacy steps below. Existing RUN_ID triggers and cmux runs still follow the legacy steps.
 
 ## 컨셉

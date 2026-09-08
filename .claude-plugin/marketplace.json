@@ -5,13 +5,13 @@
   },
   "metadata": {
     "description": "Claude and Codex discussions in Ghostty with a durable SQLite mailbox; advanced cmux co-work and review workflows.",
-    "version": "0.10.2"
+    "version": "0.10.3"
   },
   "plugins": [
     {
       "name": "crosstalk",
       "description": "Claude and Codex discussions in Ghostty with a durable SQLite mailbox; advanced cmux co-work and review workflows.",
-      "version": "0.10.2",
+      "version": "0.10.3",
       "author": {
         "name": "dongsik93"
       },

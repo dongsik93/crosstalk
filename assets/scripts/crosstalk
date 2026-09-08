@@ -6,7 +6,6 @@ import json
 import os
 from pathlib import Path
 import re
-import shlex
 import sqlite3
 import subprocess
 import sys
@@ -54,6 +53,11 @@ def connect():
         CREATE INDEX IF NOT EXISTS inbox ON messages(recipient, status, created_at);
         CREATE INDEX IF NOT EXISTS thread ON messages(thread_id, created_at);
     ''')
+    # Additive migration: preserve existing messages, including unread ones.
+    db.execute('BEGIN IMMEDIATE')
+    if 'summary' not in {r['name'] for r in db.execute('PRAGMA table_info(messages)')}:
+        db.execute("ALTER TABLE messages ADD COLUMN summary TEXT NOT NULL DEFAULT ''")
+    db.commit()
     return db
 
 
@@ -78,13 +82,17 @@ def notify(db, row):
     # Input submission is not receipt: only receive() changes pending to received.
     if row['status'] != 'pending' or (row['reply_to'] and row['mode'] == 'ask'):
         return None
-    cli = shlex.quote(str(SCRIPT))
-    text = (f'[crosstalk] mailbox {row["id"]} — Run {cli} receive {row["id"]}. '
-            'If actionable=false, stop. For a request, answer using '
-            f'{cli} reply {row["id"]} --stdin (pipe your answer); no MD files or ping. '
-            'For a reply, compare it with your own view and summarize; do not reply to a reply.')
     error = None
     try:
+        # Notifications only wake the recipient. SQLite, not visible text, selects the message.
+        korean = bridge('get-language') == 'ko'
+        kind = ('답변' if row['reply_to'] else '질문') if korean else ('Reply' if row['reply_to'] else 'Question')
+        # Summary is display-only. Never encode identity, commands or routing in it.
+        preview = ' '.join((row['summary'].strip() or row['body']).split())
+        preview = ''.join(c for c in preview if c.isprintable())
+        if len(preview) > 160:
+            preview = preview[:159] + '…'
+        text = f'[Crosstalk] {kind}: {preview}'
         bridge('send', row['recipient'], text)
     except ValueError as exc:
         error = str(exc)
@@ -107,6 +115,7 @@ def main():
     send.add_argument('peer', choices=['claude', 'codex'])
     send.add_argument('text', nargs='?')
     send.add_argument('--stdin', action='store_true')
+    send.add_argument('--summary', default='', help='One-sentence display summary; not used for routing')
     send.add_argument('--id', help='Optional idempotency key; reuse it with the same request only')
     send.add_argument('--thread', help='Root request ID for a follow-up (maximum 10 rounds)')
     send.add_argument('--mode', choices=['analyze', 'ask'], default='analyze')
@@ -117,6 +126,7 @@ def main():
     reply.add_argument('id')
     reply.add_argument('text', nargs='?')
     reply.add_argument('--stdin', action='store_true')
+    reply.add_argument('--summary', default='', help='One-sentence display summary; not used for routing')
     for name in ('retry', 'history'):
         commands.add_parser(name).add_argument('id')
     status = commands.add_parser('status')
@@ -154,8 +164,8 @@ def main():
                     round_number = requests[-1]['round'] + 1
                     if round_number > 10:
                         raise ValueError('Conversation reached its 10-round limit')
-                db.execute('INSERT INTO messages(id,thread_id,sender,recipient,body,mode,round,created_at) VALUES(?,?,?,?,?,?,?,?)',
-                           (mid, args.thread or mid, actor, recipient, body, args.mode, round_number, now()))
+                db.execute('INSERT INTO messages(id,thread_id,sender,recipient,body,mode,round,created_at,summary) VALUES(?,?,?,?,?,?,?,?,?)',
+                           (mid, args.thread or mid, actor, recipient, body, args.mode, round_number, now(), args.summary))
             db.commit()  # Store before attempting terminal input, which can fail or wake a peer immediately.
             row = message(db, mid, actor)
         elif args.command == 'receive':
@@ -163,7 +173,7 @@ def main():
                 raise ValueError('--replay requires an explicit message ID')
             db.execute('BEGIN IMMEDIATE')
             row = (message(db, args.id, actor) if args.id else db.execute(
-                "SELECT * FROM messages WHERE recipient=? AND status='pending' ORDER BY created_at,id LIMIT 1", (actor,)).fetchone())
+                "SELECT * FROM messages WHERE recipient=? AND status='pending' ORDER BY rowid LIMIT 1", (actor,)).fetchone())
             if row is None:
                 print(json.dumps({'actionable': False, 'reason': 'empty'})); return
             if row['recipient'] != actor:
@@ -188,8 +198,8 @@ def main():
                 if original['status'] != 'received':
                     raise ValueError('Receive the request before replying')
                 mid = uuid.uuid4().hex
-                db.execute('INSERT INTO messages(id,thread_id,reply_to,sender,recipient,body,mode,round,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
-                           (mid, original['thread_id'], args.id, actor, original['sender'], body, original['mode'], original['round'], now()))
+                db.execute('INSERT INTO messages(id,thread_id,reply_to,sender,recipient,body,mode,round,created_at,summary) VALUES(?,?,?,?,?,?,?,?,?,?)',
+                           (mid, original['thread_id'], args.id, actor, original['sender'], body, original['mode'], original['round'], now(), args.summary))
                 db.execute("UPDATE messages SET status='replied' WHERE id=?", (args.id,))
                 row = message(db, mid, actor)
             db.commit()
