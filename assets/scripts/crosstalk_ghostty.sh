@@ -48,6 +48,7 @@ on run argv
       set cfg to new surface configuration
       set initial working directory of cfg to item 3 of argv
       set command of cfg to item 4 of argv
+      set environment variables of cfg to {"PATH=" & (item 5 of argv)}
       set childTerm to split targetTerm direction right with configuration cfg
       return id of childTerm
     else
@@ -144,7 +145,7 @@ ghostty_get_label() {
 }
 
 ghostty_launch() {
-  local kind="${1:?kind required}" self id binary ready prompt command child binding max_wait
+  local kind="${1:?kind required}" self id binary ready prompt command child binding launcher max_wait
   case "$kind" in claude|codex) ;; *) echo "ERROR: Ghostty launch supports claude or codex" >&2; return 1 ;; esac
   max_wait="${READY_MAX_WAIT:-60}"
   validate_positive_int "$max_wait" READY_MAX_WAIT || return
@@ -153,13 +154,18 @@ ghostty_launch() {
   id=$(ghostty_id "$self") || return
   ready=$(mktemp "${TMPDIR:-/tmp}/crosstalk-ready.XXXXXXXX") || return
   binding="$ready.surface"
+  launcher="$ready.launch"
   # The first real AI turn acknowledges startup; a title/label alone is not readiness.
   printf -v prompt 'printf ready > %q' "$ready"
   prompt="Crosstalk startup check. Run exactly: $prompt . Then say Crosstalk ready and finish this turn. Do not modify project files. Later [crosstalk] mailbox messages tell you to run crosstalk receive ID and reply ID; use those tools without MD files or ping. Legacy messages may still name task files."
   # The child waits for its exact ID before starting the CLI (same cwd is now ambiguous).
-  printf -v command 'for i in {1..100}; do if [ -s %q ]; then export CROSSTALK_SURFACE_ID="$(cat %q)"; rm -f %q; exec %q %q; fi; sleep 0.1; done; echo "Crosstalk launch binding timed out" >&2; exit 1' "$binding" "$binding" "$binding" "$binary" "$prompt"
-  printf -v command '/bin/bash -c %q' "$command"
-  child=$(ghostty_rpc split "$id" "$PWD" "$command") || { rm -f "$ready"; return 1; }
+  # Keep the program in a private script: Ghostty only parses an executable and one path.
+  (umask 077
+    printf '#!/bin/bash\nset -euo pipefail\n' > "$launcher"
+    printf 'for i in {1..100}; do if [ -s %q ]; then export CROSSTALK_SURFACE_ID="$(cat %q)"; rm -f %q "$0"; exec %q %q; fi; sleep 0.1; done; echo "Crosstalk launch binding timed out" >&2; rm -f "$0"; exit 1\n' "$binding" "$binding" "$binding" "$binary" "$prompt" >> "$launcher"
+  )
+  printf -v command '/bin/bash %q' "$launcher"
+  child=$(ghostty_rpc split "$id" "$PWD" "$command" "$PATH") || { rm -f "$ready" "$launcher"; return 1; }
   child="ghostty:$child"
   printf '%s\n' "$child" > "$binding"
   ghostty_label "$child" "$kind" || return

@@ -15,7 +15,7 @@ with tempfile.TemporaryDirectory() as tmp:
     log = root / 'calls.jsonl'
     fake = root / 'osascript'
     fake.write_text('''#!/usr/bin/env python3
-import json, os, sys
+import json, os, sys, subprocess
 from pathlib import Path
 args = sys.argv[2:]
 with open(os.environ['TEST_LOG'], 'a') as out:
@@ -26,7 +26,12 @@ if op == 'find-cwd': sys.exit(1)
 if tid not in alive: sys.exit(1)
 if op == 'exists': print(tid)
 elif op == 'list': print('\\n'.join(alive))
-elif op == 'split': print(alive[-1])
+elif op == 'split':
+    if os.environ.get('TEST_LAUNCH') == '1':
+        child_env = dict(os.environ, PATH=args[4] if len(args)>4 else '/usr/bin:/bin')
+        subprocess.Popen(['/bin/bash', '--noprofile', '--norc', '-c', args[3]], env=child_env,
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    print(alive[-1])
 ''')
     fake.chmod(0o755)
     cmux = root / 'cmux'
@@ -127,6 +132,33 @@ else: print('1 /Applications/' + name + '.app/Contents/MacOS/' + name)
     assert not state.exists()
     run('capture', f'ghostty:{A}', ok=False)
     run('wait-turn', f'ghostty:{A}', 'test', 'run-test-r01-claude-a1', ok=False)
+    # Execute the actual generated launcher, but use a fake CLI and never open a UI.
+    runtime = root / 'ct-test-runtime'
+    runtime.write_text('#!/bin/sh\nexec ' + subprocess.check_output(['which', 'python3'], text=True).strip() + ' "$@"\n')
+    runtime.chmod(0o755)
+    for kind in ('codex', 'claude'):
+        cli = root / kind
+        cli.write_text('''#!/usr/bin/env ct-test-runtime
+import json, os, re, subprocess, sys
+from pathlib import Path
+assert os.environ['CROSSTALK_SURFACE_ID'].startswith('ghostty:')
+assert len(sys.argv)==2
+prompt = sys.argv[1]
+ack = re.search(r'Run exactly: (.*?) [.] Then say', prompt).group(1)
+Path(os.environ['TEST_LAUNCH_RESULT']).write_text(json.dumps({'id': os.environ['CROSSTALK_SURFACE_ID'], 'prompt': prompt}))
+subprocess.run(['/bin/bash', '-c', ack], check=True)
+''')
+        cli.chmod(0o755)
+        scratch = root / "temp dir ' with spaces"
+        scratch.mkdir(exist_ok=True)
+        result = root / 'launch-result'
+        assert run('launch', kind, TEST_LAUNCH='1', READY_MAX_WAIT='10', TMPDIR=str(scratch), TEST_LAUNCH_RESULT=str(result)) == f'ghostty:{B}'
+        data = json.loads(result.read_text())
+        assert data['id'] == f'ghostty:{B}' and 'Crosstalk startup check' in data['prompt']
+        split = [e for e in events() if e[0]=='split'][-1]
+        assert split[3].startswith('/bin/bash ') and '/bin/bash -c ' not in split[3]
+        assert split[4] == env['PATH']
+        assert not list(scratch.glob('crosstalk-ready.*'))
     alive.write_text(json.dumps([A]))
     run('send', f'ghostty:{B}', 'closed', ok=False)
     run('self', CROSSTALK_SURFACE_ID=f'ghostty:{B}', ok=False)

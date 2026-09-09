@@ -57,3 +57,11 @@ Runtime evidence is retained in the local user's `~/.claude/crosstalk/mailbox.sq
 `python3 tests/test_mailbox.py` additionally checks concurrent receipt (one actionable result), explicit replay, stable send IDs, duplicate/conflicting replies, notification failures after durable storage, retries without duplicate inserts, participant-scoped reads, the 10-round cap, muted ask replies, invalid terminal IDs, and SQLite integrity. `python3 tests/test_bridge.py` retains legacy transport coverage.
 
 These tests do not establish unattended recovery from all permission dialogs, pane closure, or interrupted AI computation. The tool records receipt when the AI calls receive; replay after interrupted processing remains explicit.
+
+## v0.10.2 — startup command and PATH (2026-09-09)
+
+A diagnostic Ghostty command inherited a PATH without `/opt/homebrew/bin`; the installed Codex launcher uses `#!/usr/bin/env node` and failed with `env: node: No such file or directory`. This is direct evidence of the missing-runtime path. The printed command alone does not establish how Ghostty grouped the original argv.
+
+The launcher now gives Ghostty `/bin/bash <private-script-path>` instead of a nested `bash -c` program, and passes the caller PATH through surface configuration. The script still waits for its exact terminal ID before starting the CLI.
+
+The regression test executes the generated startup script with fake Claude/Codex launchers whose interpreter is available only on the supplied PATH. It covers paths with spaces and apostrophes, exact binding propagation, acknowledgement, and temporary-file cleanup. The automated regression test opens no Ghostty windows. After the user explicitly requested an adjacent-pane test, the production launcher opened Codex beside the existing caller in the same tab. Codex executed the readiness acknowledgement successfully. The owned test pane was then closed; no additional standalone window was created for this live test.
