@@ -3,7 +3,7 @@
 [English](README.md) | [한국어](README.ko.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.10.4-blue)
+![Version](https://img.shields.io/badge/version-0.10.5-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-black)
 
@@ -198,11 +198,13 @@ Claude에서는 `ensure-peer claude agy`를 사용합니다. `agy`와 `antigravi
 
 터미널을 감지할 때 Ghostty 환경변수와 호출자의 상위 프로세스를 함께 확인합니다. `TERM_PROGRAM`이 없다고 cmux로 간주하지 않으며, 오래된 소켓 파일만으로 터미널이 실행 중이라고 판단하지 않습니다.
 
-같은 프로젝트 디렉터리의 pane이 여러 개면 오류에 ID와 제목이 표시됩니다. 해당 CLI에서 `~/.claude/scripts/crosstalk_bridge.sh bind ghostty:<UUID>`를 한 번 실행하세요. Claude에서는 `/crosstalk:setup --surface ghostty:<UUID>`로 지정할 수도 있습니다. 선택은 해당 CLI 프로세스가 살아 있는 동안 유지됩니다. 다른 CLI에서 대신 실행하면 안 됩니다.
+아무 pane에서 `/crosstalk:setup`을 한 번 실행해 모든 pane(호출한 pane 포함)에 라벨을 붙이면, 같은 디렉터리의 다른 CLI는 첫 호출 때 자기 CLI 종류로 자기 pane을 스스로 찾습니다. pane마다 setup을 반복할 필요가 없습니다. Codex는 tool 명령이 첫 번째 Codex가 소유한 데몬에서 실행되어 프로세스 트리가 엉뚱한 pane을 가리키므로, 세션 ID(`CODEX_THREAD_ID`)로 자신을 식별합니다. 예전 pane을 닫고 새 pane에서 Codex 세션을 resume하면 자동으로 다시 찾습니다.
+
+그래도 pane을 식별하지 못하면(같은 디렉터리에 같은 종류의 CLI가 둘이거나, 예전 pane이 열려 있는 채로 Codex 세션을 다른 pane에서 resume한 경우) 오류에 후보 ID와 제목이 표시됩니다. 해당 CLI에서 `~/.claude/scripts/crosstalk_bridge.sh bind ghostty:<UUID>`를 한 번 실행하세요. Claude에서는 `/crosstalk:setup --surface ghostty:<UUID>`로 지정할 수도 있습니다. 선택은 해당 CLI 프로세스가 살아 있는 동안 유지됩니다. 다른 CLI에서 대신 실행하면 안 됩니다.
 
 시작 대기 시간이 초과되면 기존 상대 pane에서 로그인이나 신뢰 확인을 마친 뒤 다시 시도하세요. Crosstalk은 시작 대기 상태를 기록하므로 재시도할 때 중복 pane을 만들지 않습니다.
 
-브리지가 기존 CLI에 처음 연결할 때는 Ghostty 터미널 중 작업 디렉터리가 같은 터미널이 하나뿐이어야 합니다. 연결 후에는 호출자 프로세스의 식별 정보에 연결을 고정합니다. 디렉터리가 겹치면 포커스된 터미널을 추측하지 않고 실패합니다. 이 경우 브리지 호출에 `CROSSTALK_SURFACE_ID=ghostty:<UUID>`를 명시하세요. 새로 실행한 상대 CLI는 정확한 ID를 상속받습니다. ID와 디렉터리는 다음 명령으로 확인합니다.
+브리지가 기존 CLI에 처음 연결할 때는 Ghostty 터미널 중 작업 디렉터리가 같은 터미널이 하나뿐이거나, 라벨이 붙은 pane 중 호출자와 같은 종류가 하나뿐이어야 합니다. 연결 후에는 호출자 프로세스의 식별 정보에 연결을 고정합니다. 디렉터리가 겹치면 포커스된 터미널을 추측하지 않고 실패합니다. 이 경우 브리지 호출에 `CROSSTALK_SURFACE_ID=ghostty:<UUID>`를 명시하세요. 새로 실행한 상대 CLI는 정확한 ID를 상속받습니다(Codex는 시작할 때 세션을 pane에 연결합니다). ID와 디렉터리는 다음 명령으로 확인합니다.
 
 ```sh
 osascript -e 'tell application "Ghostty" to get {id, name, working directory} of every terminal'

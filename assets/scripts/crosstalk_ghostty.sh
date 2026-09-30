@@ -17,6 +17,13 @@ on run argv
       if (count of matches) is not 1 then error "Cannot identify caller uniquely in this directory. Candidates:" & linefeed & candidates & "From the intended CLI, run crosstalk_bridge.sh bind ghostty:<UUID> once. Do not guess the focused pane."
       return item 1 of matches
     end if
+    if op is "cwd-list" then
+      set rows to ""
+      repeat with term in terminals
+        if working directory of term is (item 2 of argv) then set rows to rows & id of term & linefeed
+      end repeat
+      return rows
+    end if
     set tid to item 2 of argv
     if not (exists terminal id tid) then error "Ghostty terminal no longer exists: " & tid
     set targetTerm to terminal id tid
@@ -70,6 +77,10 @@ ghostty_id() {
 
 ghostty_caller() {
   local pid="$$" device parent
+  # Codex runs tool commands in a daemon owned by its *first* instance, so the process tree
+  # points at the wrong pane. The session id is the only per-pane identity it passes through.
+  # ponytail: a resumed session in a new pane keeps its id; re-run bind there.
+  if [ -n "${CODEX_THREAD_ID:-}" ]; then printf 'codex-%s\tcodex\tsession\n' "$CODEX_THREAD_ID"; return; fi
   while [ "$pid" -gt 1 ]; do
     read -r parent device <<< "$(ps -o ppid=,tty= -p "$pid")"
     if [[ "$device" =~ ^ttys[0-9]+$ ]]; then break; fi
@@ -97,6 +108,26 @@ ghostty_bind() {
   printf 'ghostty:%s\n' "$id"
 }
 
+# Prints the one cwd-matching terminal labelled with this caller's CLI kind (labels are
+# written by `setup` from any pane); falls back to the one unlabelled terminal. Fails otherwise.
+ghostty_unique_by_kind() {
+  local want="" id kind hits=() blank=()
+  case "$1" in
+    codex-*) want=codex ;;
+    *) case "$(ps -o command= -p "$1")" in
+         *codex*) want=codex ;; *agy*|*antigravity*) want=antigravity ;; *claude*) want=claude ;;
+       esac ;;
+  esac
+  while IFS= read -r id; do
+    [ -n "$id" ] || continue
+    kind=$(ghostty_get_label "$id" 2>/dev/null || true)
+    if [ -z "$kind" ]; then blank+=("$id"); elif [ "$kind" = "$want" ]; then hits+=("$id"); fi
+  done < <(ghostty_rpc cwd-list "$PWD")
+  [ "${#hits[@]}" -gt 0 ] || hits=(${blank[@]+"${blank[@]}"})
+  [ "${#hits[@]}" -eq 1 ] || return 1
+  printf '%s\n' "${hits[0]}"
+}
+
 ghostty_self() {
   local context pid device id cache stamp
   if [ -n "${CROSSTALK_SURFACE_ID:-}" ]; then
@@ -107,12 +138,14 @@ ghostty_self() {
     IFS=$'\t' read -r pid device stamp <<< "$context"
     cache="${CROSSTALK_CONFIG_DIR:-$HOME/.claude/crosstalk}/ghostty/bind-$pid.json"
     id=$(jq -r --arg stamp "$stamp" --arg tty "$device" 'select(.stamp == $stamp and .tty == $tty) | .id' "$cache" 2>/dev/null || true)
-    if [ -n "$id" ]; then
-      ghostty_id "$id" >/dev/null || return
-      ghostty_rpc exists "$id" >/dev/null || return
+    # A cached pane that is gone (e.g. `codex resume` in a new pane) is re-resolved, not an error.
+    if [ -n "$id" ] && ghostty_id "$id" >/dev/null && ghostty_rpc exists "$id" >/dev/null 2>&1; then
+      :
     else
-      # ponytail: initial binding needs a unique cwd; use bind <ID> for ambiguous tabs.
-      id=$(ghostty_rpc find-cwd "$PWD") || return
+      # Unique cwd binds directly. Otherwise a label written by `setup` from any pane
+      # (e.g. the left CLI) lets this CLI pick its own pane by kind, so no second setup.
+      # ponytail: two same-kind CLIs in one cwd still need bind <ID>.
+      id=$(ghostty_unique_by_kind "$pid") || { ghostty_rpc find-cwd "$PWD"; return 1; }
       ghostty_bind "$id"
       return
     fi
@@ -174,13 +207,17 @@ ghostty_launch() {
   launcher="$ready.launch"
   # The first real AI turn acknowledges startup; a title/label alone is not readiness.
   printf -v prompt 'printf ready > %q' "$ready"
+  # Codex tool shells don't inherit CROSSTALK_SURFACE_ID, so bind this pane to its session once.
+  [ "$kind" != codex ] || prompt="~/.claude/scripts/crosstalk_bridge.sh bind __SID__ >/dev/null && $prompt"
   prompt="Crosstalk startup check. Run exactly: $prompt . Then say Crosstalk ready and finish this turn. Do not modify project files. For later [Crosstalk] Question/Reply or 질문/답변 previews, read ~/.claude/crosstalk/mailbox.md and run ~/.claude/scripts/crosstalk receive without an ID. Process only the returned body and use its returned ID for reply --summary. Drain pending messages one at a time. Do not answer the preview directly or print protocol IDs. Legacy messages may still name task files."
   # The child waits for its exact ID before starting the CLI (same cwd is now ambiguous).
   # Keep the program in a private script: Ghostty only parses an executable and one path.
   (umask 077
     printf '#!/bin/bash\nset -euo pipefail\n' > "$launcher"
+    printf 'p=%q\n' "$prompt" >> "$launcher"
     printf 'for i in {1..100}; do if [ -s %q ]; then export CROSSTALK_SURFACE_ID="$(cat %q)"; rm -f %q "$0"; exec ' "$binding" "$binding" "$binding" >> "$launcher"
-    printf '%q ' "$binary" ${cli_args[@]+"${cli_args[@]}"} "$prompt" >> "$launcher"
+    printf '%q ' "$binary" ${cli_args[@]+"${cli_args[@]}"} >> "$launcher"
+    printf '"${p//__SID__/$CROSSTALK_SURFACE_ID}"' >> "$launcher"
     printf '; fi; sleep 0.1; done; echo "Crosstalk launch binding timed out" >&2; rm -f "$0"; exit 1\n' >> "$launcher"
   )
   printf -v command '/bin/bash %q' "$launcher"

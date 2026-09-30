@@ -23,6 +23,7 @@ with open(os.environ['TEST_LOG'], 'a') as out:
 op, tid = args[:2]
 alive = json.loads(Path(os.environ['TEST_ALIVE']).read_text())
 if op == 'find-cwd': sys.exit(1)
+if op == 'cwd-list': print('\\n'.join(alive)); sys.exit(0)
 if tid not in alive: sys.exit(1)
 if op == 'exists': print(tid)
 elif op == 'list': print('\\n'.join(alive))
@@ -95,6 +96,18 @@ else: print('1 /Applications/' + name + '.app/Contents/MacOS/' + name)
     assert run('bind', f'ghostty:{A}') == f'ghostty:{A}'
     assert run('self', CROSSTALK_SURFACE_ID='') == f'ghostty:{A}'
     run('self', ok=False, CROSSTALK_SURFACE_ID='', TEST_START='a different process start')
+    # Labels written once (by setup in any pane) let each CLI find its own pane by kind.
+    assert run('self', CROSSTALK_SURFACE_ID='', TEST_START='other start', TEST_PARENT_TERMINAL='codex') == f'ghostty:{A}'
+    assert run('self', CROSSTALK_SURFACE_ID='', TEST_START='third start', TEST_PARENT_TERMINAL='claude') == f'ghostty:{B}'
+    # Codex tool shells share a daemon: identity follows CODEX_THREAD_ID, not the process tree.
+    assert run('self', CROSSTALK_SURFACE_ID='', CODEX_THREAD_ID='t1') == f'ghostty:{A}'
+    assert run('bind', f'ghostty:{B}', CROSSTALK_SURFACE_ID='', CODEX_THREAD_ID='t2') == f'ghostty:{B}'
+    assert run('self', CROSSTALK_SURFACE_ID='', CODEX_THREAD_ID='t2') == f'ghostty:{B}'
+    assert run('self', CROSSTALK_SURFACE_ID='', CODEX_THREAD_ID='t1') == f'ghostty:{A}'
+    # Resume in a new pane: the cached pane is gone, so it is re-resolved by kind.
+    dead = '00000000-0000-0000-0000-00000000dead'
+    (root / 'config/ghostty/bind-codex-t3.json').write_text(json.dumps({'id': dead, 'stamp': 'session', 'tty': 'codex'}))
+    assert run('self', CROSSTALK_SURFACE_ID='', CODEX_THREAD_ID='t3') == f'ghostty:{A}'
     run('bind', 'ghostty:invalid', ok=False)
     # Untrusted text is a single argv value, never AppleScript or shell code.
     payload = '한글 "quote" \\ backslash\n$HOME $(touch NEVER) `echo nope`'

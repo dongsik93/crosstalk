@@ -3,7 +3,7 @@
 English | [한국어](README.ko.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.10.4-blue)
+![Version](https://img.shields.io/badge/version-0.10.5-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-black)
 
@@ -198,11 +198,13 @@ New agy panes learn the mailbox workflow at startup. For an existing manually bo
 
 Terminal detection checks the caller's process ancestry as well as Ghostty environment variables; a missing `TERM_PROGRAM` no longer defaults to cmux. A stale socket alone is not treated as a running terminal.
 
-If multiple Ghostty panes share the project directory, the error lists their IDs and titles. In the intended CLI, run `~/.claude/scripts/crosstalk_bridge.sh bind ghostty:<UUID>` once, or `/crosstalk:setup --surface ghostty:<UUID>` from Claude. The selection is remembered for that CLI process; do not run the bind command from a different CLI on its behalf.
+Run `/crosstalk:setup` once from any pane and label every pane (including the caller). The other CLIs in the same directory then find their own pane by CLI kind on their first call, so setup does not need to be repeated in each pane. Codex identifies itself by its session ID (`CODEX_THREAD_ID`), because its tool commands run in a daemon owned by the first Codex instance and the process tree points at the wrong pane. Resuming a Codex session in a new pane re-resolves automatically if the old pane is closed.
+
+If the pane still cannot be identified (for example two CLIs of the same kind in one directory, or a resumed Codex session while its old pane is still open), the error lists candidate IDs and titles. In the intended CLI, run `~/.claude/scripts/crosstalk_bridge.sh bind ghostty:<UUID>` once, or `/crosstalk:setup --surface ghostty:<UUID>` from Claude. The selection is remembered for that CLI process; do not run the bind command from a different CLI on its behalf.
 
 If startup times out, finish login/trust prompts in the existing peer pane and retry. Crosstalk keeps track of that pending startup so a retry does not create a duplicate.
 
-The bridge's first connection to an existing CLI requires a unique working directory among Ghostty terminals. That binding is then tied to the caller process identity. Ambiguous directories fail instead of guessing the focused terminal; set `CROSSTALK_SURFACE_ID=ghostty:<UUID>` explicitly for those bridge calls. Newly launched peers inherit their exact ID. IDs and directories can be inspected with:
+The bridge's first connection to an existing CLI needs a unique working directory among Ghostty terminals, or a unique pane of the caller's CLI kind among the labelled ones. That binding is then tied to the caller process identity. Ambiguous directories fail instead of guessing the focused terminal; set `CROSSTALK_SURFACE_ID=ghostty:<UUID>` explicitly for those bridge calls. Newly launched peers inherit their exact ID (Codex binds its session to the pane at startup). IDs and directories can be inspected with:
 
 ```sh
 osascript -e 'tell application "Ghostty" to get {id, name, working directory} of every terminal'

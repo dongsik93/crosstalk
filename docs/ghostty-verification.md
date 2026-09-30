@@ -83,3 +83,9 @@ Callers remain Claude or Codex. Both `agy` and `antigravity` resolve to the Anti
 New-peer workflows now offer the existing CLI permission settings (default) or an explicit per-launch `--auto-approve` choice. The opt-in maps to Codex `--yolo` (approval and sandbox bypass) and Claude/agy `--dangerously-skip-permissions`. It is not stored as a global preference. Existing peers reject permission-mode changes through ensure-peer.
 
 The bridge test executes generated scripts against fake Claude/Codex/agy launchers and asserts exact default and opt-in argv, agy's interactive flag, alias normalization, binding, and cleanup. Mailbox tests cover both Claude and Codex sending to an agy peer and receiving the correctly linked reply. Opt-in modes were not enabled in live sessions for this test. CLI help confirmed the actual flags, including Codex's accepted --yolo alias.
+
+## v0.10.5 — One setup labels every pane; Codex session identity (2026-10-01)
+
+Running setup in any pane now covers the others: a CLI that cannot be identified by directory picks its own pane by matching its CLI kind against the labels (falling back to the single unlabelled pane). Tested live with other Codex sessions already running.
+
+Codex runs tool commands in an app-server daemon owned by the first Codex instance, so the process tree pointed new Codex panes at the first pane, and the daemon did not pass `CROSSTALK_SURFACE_ID`. Codex callers are now keyed on `CODEX_THREAD_ID`. A manually started Codex pane, labelled once from the Claude pane, resolved its own ID; a Codex peer started by `launch` bound itself at startup and resolved its own ID; `list-all` from that peer showed the Claude pane as peer. A cached pane that no longer exists (resume in a new pane) is re-resolved by kind instead of failing. Not verified live: resuming a Codex session in a new pane (covered by the fake-terminal test only). A resume while the old pane is still open still needs an explicit `bind`.

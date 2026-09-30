@@ -76,6 +76,8 @@ case "$LANGUAGE" in en|ko) ;; *) LANGUAGE="en" ;; esac
 
 Use `bridge list-all` and `bridge label` with `ghostty:<UUID>` IDs. Labels are stored separately and do not replace terminal titles. Ghostty has no screen preview API: for an unknown pane show its ID and ask for Claude, Codex, Antigravity, shell, or skip. Do not call capture/read-screen. For an existing agy pane, have that CLI read ~/.claude/crosstalk/mailbox.md once to register the summary-notification workflow; do not inject a legacy RUN_ID trigger. Newly launched peers are labelled automatically by `bridge ensure-peer`.
 
+**One setup covers every pane.** Run setup from any one pane and label every pane in that tab (including the caller itself as claude/codex/antigravity). Other CLIs in the same directory then bind themselves on their first `self` call by matching their own CLI kind against those labels — do not ask the user to run setup or `bind` again in the other pane. Codex identifies itself by `CODEX_THREAD_ID` (its tool commands run in a daemon owned by the first codex, so the process tree is unreliable); `launch` binds that session to its pane at startup. Only two same-kind CLIs in one directory still need an explicit `bind`.
+
 ## 동작
 
 1. 모든 cmux pane 스캔
