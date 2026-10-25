@@ -15,11 +15,17 @@ with tempfile.TemporaryDirectory() as tmp:
     log = root / 'calls.jsonl'
     fake = root / 'osascript'
     fake.write_text('''#!/usr/bin/env python3
-import json, os, sys, subprocess
+import json, os, re, sys, subprocess, urllib.parse
 from pathlib import Path
 args = sys.argv[2:]
 with open(os.environ['TEST_LOG'], 'a') as out:
     out.write(json.dumps(args) + '\\n')
+if args[0] == 'wd-list':
+    # A reports whatever OSC 7 path its TTY last carried (the probe's or the restored one).
+    seen = Path(os.environ['TEST_OSC']).read_text(errors='replace') if os.environ.get('TEST_OSC') else ''
+    paths = re.findall(r'\x1b]7;file://[^/]*([^\x1b]*)\x1b\\\\', seen)
+    wd = urllib.parse.unquote(paths[-1]) if paths and os.environ.get('TEST_PROBE_MATCH') == '1' else os.environ.get('TEST_WD', '/work/한글 dir')
+    print(f'{os.environ.get("TEST_PROBE_ID", "x")}\\t{wd}\\nother\\t/elsewhere'); sys.exit(0)
 op, tid = args[:2]
 alive = json.loads(Path(os.environ['TEST_ALIVE']).read_text())
 if op == 'find-cwd': sys.exit(1)
@@ -52,7 +58,11 @@ elif sys.argv[1] == 'read-screen': print('screen text')
 import os, sys
 name = os.environ.get('TEST_PARENT_TERMINAL', 'other')
 if 'ppid=,tty=' in sys.argv:
-    print('1 ttys555' if sys.argv[-1]=='4242' else '4242 ??')
+    # TEST_INNER_TTY: the tool shell sits on a CLI-owned inner pty (agy), the CLI on the pane's TTY.
+    inner = os.environ.get('TEST_INNER_TTY')
+    if sys.argv[-1] == '4242': print('1 ' + os.environ.get('TEST_TTY', 'ttys555'))
+    elif sys.argv[-1] == '4241': print('4242 ' + inner)  # second shell on the inner pty
+    else: print(('4241 ' + inner) if inner else '4242 ??')
 elif 'lstart=' in sys.argv: print(os.environ.get('TEST_START', 'Mon Sep 7 22:58:00 2026'))
 else: print('1 /Applications/' + name + '.app/Contents/MacOS/' + name)
 ''')
@@ -179,6 +189,37 @@ subprocess.run(['/bin/bash', '-c', ack], check=True)
         assert not list(scratch.glob('crosstalk-ready.*'))
     run('launch','agy','--unknown',ok=False)
     run('ensure-peer','codex','agy','--auto-approve',ok=False)  # cannot upgrade an existing peer
+    # TTY probe: a real pty stands in for the caller's terminal; its OSC 7 output is captured.
+    import re, threading, urllib.parse
+    master, slave = os.openpty()
+    osc = root / 'osc.bin'
+    osc.write_bytes(b'')
+    def pump():
+        while True:
+            try: chunk = os.read(master, 4096)
+            except OSError: return
+            if not chunk: return
+            with open(osc, 'ab') as out: out.write(chunk)
+    threading.Thread(target=pump, daemon=True).start()
+    probe = dict(CROSSTALK_SURFACE_ID='', TEST_TTY=os.path.basename(os.ttyname(slave)), TEST_OSC=str(osc),
+                 TEST_PROBE_ID=A, TEST_PROBE_MATCH='1')
+    def last_osc_path():
+        found = re.findall(rb'\x1b]7;file://[^/]*([^\x1b]*)\x1b\\', osc.read_bytes())
+        return urllib.parse.unquote(found[-1].decode()) if found else None
+    # Found exactly, cached, and the pane's original (non-ASCII) directory is restored.
+    assert run('self', CROSSTALK_CONFIG_DIR=str(root / 'probe1'), **probe) == f'ghostty:{A}'
+    assert last_osc_path() == '/work/한글 dir'
+    assert len(list((root / 'probe1/ghostty').glob('bind-4242.json'))) == 1
+    before = osc.read_bytes()
+    assert run('self', CROSSTALK_CONFIG_DIR=str(root / 'probe1'), **probe) == f'ghostty:{A}'
+    assert osc.read_bytes() == before  # cached: no second probe
+    # agy: the tool shell is on an inner pty, so probe and cache follow the CLI on the pane's TTY.
+    assert run('self', CROSSTALK_CONFIG_DIR=str(root / 'probe3'), TEST_INNER_TTY='ttys900', **probe) == f'ghostty:{A}'
+    assert [p.name for p in (root / 'probe3/ghostty').glob('bind-*.json')] == ['bind-4242.json']
+    # No pane reports the probe: fail closed, but still restore (here to the caller's cwd).
+    assert run('self', ok=False, CROSSTALK_CONFIG_DIR=str(root / 'probe2'), **(probe | {'TEST_PROBE_MATCH': '0'})) == ''
+    assert last_osc_path() == os.getcwd()
+    os.close(slave); os.close(master)
     for kind in ('codex','claude','agy'):
         assert run('launch',kind,'--auto-approve',TEST_LAUNCH='1',TEST_AUTO_APPROVE='1',READY_MAX_WAIT='10',TMPDIR=str(scratch),TEST_LAUNCH_RESULT=str(result)) == f'ghostty:{B}'
     run('launch','agy','--auto-approve','extra',ok=False)

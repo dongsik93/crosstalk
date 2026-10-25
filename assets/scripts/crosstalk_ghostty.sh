@@ -17,6 +17,13 @@ on run argv
       if (count of matches) is not 1 then error "Cannot identify caller uniquely in this directory. Candidates:" & linefeed & candidates & "From the intended CLI, run crosstalk_bridge.sh bind ghostty:<UUID> once. Do not guess the focused pane."
       return item 1 of matches
     end if
+    if op is "wd-list" then
+      set rows to ""
+      repeat with term in terminals
+        set rows to rows & id of term & (character id 9) & (working directory of term as text) & linefeed
+      end repeat
+      return rows
+    end if
     if op is "cwd-list" then
       set rows to ""
       repeat with term in terminals
@@ -76,18 +83,20 @@ ghostty_id() {
 }
 
 ghostty_caller() {
-  local pid="$$" device parent
+  local pid="$$" parent tty device="" caller=""
   # Codex runs tool commands in a daemon owned by its *first* instance, so the process tree
   # points at the wrong pane. The session id is the only per-pane identity it passes through.
   # ponytail: a resumed session in a new pane keeps its id; re-run bind there.
   if [ -n "${CODEX_THREAD_ID:-}" ]; then printf 'codex-%s\tcodex\tsession\n' "$CODEX_THREAD_ID"; return; fi
-  while [ "$pid" -gt 1 ]; do
-    read -r parent device <<< "$(ps -o ppid=,tty= -p "$pid")"
-    if [[ "$device" =~ ^ttys[0-9]+$ ]]; then break; fi
-    case "$parent" in ''|*[!0-9]*) break ;; esac
+  # The caller is the lowest process on the outermost TTY: agy runs tools in its own inner pty,
+  # so the first TTY seen from the tool shell is not the pane's.
+  while [[ "$pid" =~ ^[0-9]+$ ]] && [ "$pid" -gt 1 ]; do
+    read -r parent tty <<< "$(ps -o ppid=,tty= -p "$pid")"
+    if [[ "$tty" =~ ^ttys[0-9]+$ ]] && [ "$tty" != "$device" ]; then caller="$pid"; device="$tty"; fi
     [ "$parent" != "$pid" ] || break
     pid="$parent"
   done
+  pid="$caller"
   if [[ ! "${device:-}" =~ ^ttys[0-9]+$ ]]; then
     echo "ERROR: no caller TTY. Run inside Ghostty or set CROSSTALK_SURFACE_ID=ghostty:<UUID>." >&2
     return 1
@@ -128,6 +137,27 @@ ghostty_unique_by_kind() {
   printf '%s\n' "${hits[0]}"
 }
 
+# Finds the terminal behind a TTY: Ghostty exposes no TTY/PID, so briefly report a unique
+# working directory via OSC 7 (invisible, unlike a title), look it up, then restore it.
+# Runs only when the caller has no binding yet; ghostty_bind caches the result.
+ghostty_probe() {
+  local tty="$1" tok="/crosstalk-probe-$$-$RANDOM" before rows id="" wd="" orig i
+  [[ "$tty" =~ ^ttys[0-9]+$ ]] && [ -w "/dev/$tty" ] || return 1
+  before=$(ghostty_rpc wd-list) || return 1
+  printf '\033]7;file://%s%s\033\\' "$(hostname)" "$tok" > "/dev/$tty" || return 1
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    rows=$(ghostty_rpc wd-list) && id=$(awk -F'\t' -v t="$tok" '$2 == t {print $1}' <<< "$rows")
+    [ -z "$id" ] || break
+    sleep 0.1
+  done
+  [ -n "$id" ] && orig=$(awk -F'\t' -v i="$id" '$1 == i {print $2}' <<< "$before")
+  # Never leave the probe path behind; a pane that had no directory gets the caller's.
+  orig=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "${orig:-$PWD}")
+  printf '\033]7;file://%s%s\033\\' "$(hostname)" "$orig" > "/dev/$tty"
+  [ "$(grep -c . <<< "$id")" -eq 1 ] || return 1
+  printf '%s\n' "$id"
+}
+
 ghostty_self() {
   local context pid device id cache stamp
   if [ -n "${CROSSTALK_SURFACE_ID:-}" ]; then
@@ -142,10 +172,10 @@ ghostty_self() {
     if [ -n "$id" ] && ghostty_id "$id" >/dev/null && ghostty_rpc exists "$id" >/dev/null 2>&1; then
       :
     else
-      # Unique cwd binds directly. Otherwise a label written by `setup` from any pane
-      # (e.g. the left CLI) lets this CLI pick its own pane by kind, so no second setup.
-      # ponytail: two same-kind CLIs in one cwd still need bind <ID>.
-      id=$(ghostty_unique_by_kind "$pid") || { ghostty_rpc find-cwd "$PWD"; return 1; }
+      # Probe the caller's own TTY first (exact). Codex has no TTY of its own (shared daemon),
+      # so it falls back to a label written by `setup` from any pane, matched by CLI kind.
+      # shortcut: two same-kind Codex panes in one cwd still need bind <ID>.
+      id=$(ghostty_probe "$device") || id=$(ghostty_unique_by_kind "$pid") || { ghostty_rpc find-cwd "$PWD"; return 1; }
       ghostty_bind "$id"
       return
     fi

@@ -10,7 +10,7 @@ argument-hint: [--language en|ko] [--surface ghostty:<UUID>]
 
 Ghostty에서 `--surface ghostty:<UUID>`를 지정하면 현재 CLI의 도구 셸에서 `~/.claude/scripts/crosstalk_bridge.sh bind ghostty:<UUID>`를 실행한다. 이 연결은 현재 CLI 프로세스가 살아 있는 동안 유지된다. 명령을 다른 CLI에서 대신 실행하지 않는다.
 
-Ghostty의 `self`가 같은 디렉터리의 여러 후보를 반환하면 ID와 제목을 보여주고 사용자가 현재 CLI에 해당하는 후보를 고르게 한다. 선택한 ID로 `bind`한 뒤 `list-all`과 라벨링을 계속한다. 포커스나 첫 후보를 임의로 고르지 않는다. 이 경우 cmux 실행이나 CLI 재시작을 요구하지 않는다.
+Ghostty의 `self`는 Claude/agy 호출자의 pane을 TTY 탐침(OSC 7)으로 직접 찾으므로 보통 묻지 않는다. 그래도 `self`가 같은 디렉터리의 여러 후보를 반환하면(주로 Codex 호출자) ID와 제목을 보여주고 사용자가 현재 CLI에 해당하는 후보를 고르게 한다. 선택한 ID로 `bind`한 뒤 `list-all`과 라벨링을 계속한다. 포커스나 첫 후보를 임의로 고르지 않는다. 이 경우 cmux 실행이나 CLI 재시작을 요구하지 않는다.
 
 두 가지 용도:
 
@@ -77,6 +77,10 @@ case "$LANGUAGE" in en|ko) ;; *) LANGUAGE="en" ;; esac
 Use `bridge list-all` and `bridge label` with `ghostty:<UUID>` IDs. Labels are stored separately and do not replace terminal titles. Ghostty has no screen preview API: for an unknown pane show its ID and ask for Claude, Codex, Antigravity, shell, or skip. Do not call capture/read-screen. For an existing agy pane, have that CLI read ~/.claude/crosstalk/mailbox.md once to register the summary-notification workflow; do not inject a legacy RUN_ID trigger. Newly launched peers are labelled automatically by `bridge ensure-peer`.
 
 **One setup covers every pane.** Run setup from any one pane and label every pane in that tab (including the caller itself as claude/codex/antigravity). Other CLIs in the same directory then bind themselves on their first `self` call by matching their own CLI kind against those labels — do not ask the user to run setup or `bind` again in the other pane. Codex identifies itself by `CODEX_THREAD_ID` (its tool commands run in a daemon owned by the first codex, so the process tree is unreliable); `launch` binds that session to its pane at startup. Only two same-kind CLIs in one directory still need an explicit `bind`.
+
+**Handshake (Ghostty).** After labelling, bind every peer exactly: for each pane labelled claude, codex or antigravity other than self, run
+`~/.claude/scripts/crosstalk_bridge.sh send <ID> "Crosstalk setup: run exactly ~/.claude/scripts/crosstalk_bridge.sh bind <ID> and reply only: bound"`
+with that pane's own `<ID>`. The sender typed into that pane, so the ID is certain; this also covers same-kind panes and a resumed Codex session whose old pane is still open. It costs the peer one short turn; a busy peer handles it after its current turn. Do not send it to shell panes.
 
 ## 동작
 
