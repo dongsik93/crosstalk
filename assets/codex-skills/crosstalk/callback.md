@@ -1,5 +1,8 @@
 # $crosstalk callback
 
+This callback is only for explicit legacy `RUN_ID` conversations. New Ghostty reply previews use the protocol-2 mailbox: capabilities gate, receive, then ack or atomic send --after-reply. Never route a mailbox message to this file's ping logic.
+
+
 Handle bridge callbacks sent to a Codex moderator.
 
 Callback format:
@@ -55,7 +58,7 @@ Then print the summary path and stop.
 For each response file in the current round, run deterministic verdict extraction:
 
 ```bash
-~/.claude/scripts/crosstalk_bridge.sh extract-verdict "$RESP"
+~/.claude/scripts/crosstalk_bridge.sh extract-verdict "$RESP" --json
 ```
 
 Do not infer verdicts yourself.

@@ -6,9 +6,9 @@ argument-hint: <질문>
 
 # /crosstalk:ask (가벼운 의견 수집 — fire-and-forget)
 
-Incoming `[Crosstalk] 질문:/답변:/Question:/Reply:` previews: read `~/.claude/crosstalk/mailbox.md` and call ID-less `receive`. Do not answer the preview directly or infer an ID from it. Process the actual DB row, then check for the next pending message.
+Incoming `[Crosstalk] 질문:/답변:/Question:/Reply:` previews: run `~/.claude/scripts/crosstalk capabilities --json`, require protocol 2 and healthy installation, and read its returned mailbox instruction path and call ID-less `receive`. Do not answer the preview directly or infer an ID from it. Process the actual DB row, then check for the next pending message.
 
-For a new Ghostty request (bridge `backend` returns `ghostty`) or an incoming `[crosstalk] mailbox <ID>`, read `~/.claude/crosstalk/mailbox.md` and use that send/receive/reply workflow instead of the legacy steps below. Existing RUN_ID triggers and cmux runs still follow the legacy steps.
+For a new Ghostty request (bridge `backend` returns `ghostty`) or an incoming `[crosstalk] mailbox <ID>`, run `~/.claude/scripts/crosstalk capabilities --json`, require protocol 2 and healthy installation, and read its returned mailbox instruction path and use that lease/reply/ack workflow instead of the legacy steps below. Existing RUN_ID triggers and cmux runs still follow the legacy steps.
 
 각 peer에게 같은 질문을 한 번 던지고, 호출자도 자기 답을 그 자리에서 출력하고, 끝. callback도 ping도 통합도 없음.
 

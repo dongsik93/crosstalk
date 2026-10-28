@@ -1,6 +1,6 @@
 # $crosstalk ask — fire-and-forget
 
-For a new Ghostty request or an incoming mailbox notification, read `mailbox.md` and follow it instead of the legacy steps below. Existing RUN_ID triggers still follow the legacy steps.
+For a new Ghostty request or an incoming mailbox notification, run `~/.claude/scripts/crosstalk capabilities --json`, require protocol 2 and healthy installation, read its returned mailbox instruction path, and follow that protocol-2 flow instead of the legacy steps below. Existing RUN_ID triggers still follow the legacy steps.
 
 Quick opinion sampling. Caller fans out the question and answers in its own pane. Peers answer in their own panes. No ping, no callback, no aggregation.
 

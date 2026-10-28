@@ -35,6 +35,7 @@ on run argv
     if not (exists terminal id tid) then error "Ghostty terminal no longer exists: " & tid
     set targetTerm to terminal id tid
     if op is "exists" then return tid
+    if op is "tty" then return (tty of targetTerm as text)
     if op is "list" then
       repeat with win in windows
         repeat with tb in tabs of win
@@ -87,6 +88,9 @@ ghostty_caller() {
   # Codex runs tool commands in a daemon owned by its *first* instance, so the process tree
   # points at the wrong pane. The session id is the only per-pane identity it passes through.
   # ponytail: a resumed session in a new pane keeps its id; re-run bind there.
+  if [ -n "${CODEX_THREAD_ID:-}" ] && [[ ! "$CODEX_THREAD_ID" =~ ^[A-Za-z0-9_-]{1,128}$ ]]; then
+    echo "ERROR: invalid Codex session ID" >&2; return 1
+  fi
   if [ -n "${CODEX_THREAD_ID:-}" ]; then printf 'codex-%s\tcodex\tsession\n' "$CODEX_THREAD_ID"; return; fi
   # The caller is the lowest process on the outermost TTY: agy runs tools in its own inner pty,
   # so the first TTY seen from the tool shell is not the pane's.
@@ -105,15 +109,19 @@ ghostty_caller() {
 }
 
 ghostty_bind() {
-  local id context pid device stamp cache
+  local id context pid device stamp cache temporary evidence="${2:-explicit}"
   id=$(ghostty_id "$1") || return
   ghostty_rpc exists "$id" >/dev/null || return
   context=$(ghostty_caller) || return
   IFS=$'\t' read -r pid device stamp <<< "$context"
   cache="${CROSSTALK_CONFIG_DIR:-$HOME/.claude/crosstalk}/ghostty/bind-$pid.json"
-  mkdir -p "$(dirname "$cache")"
-  jq -n --arg id "$id" --arg stamp "$stamp" --arg tty "$device" \
-    '{id: $id, stamp: $stamp, tty: $tty}' > "$cache"
+  (umask 077; mkdir -p "$(dirname "$cache")")
+  temporary=$(mktemp "$cache.XXXXXXXX") || return
+  if ! jq -n --arg id "$id" --arg stamp "$stamp" --arg tty "$device" --arg evidence "$evidence" \
+    '{id: $id, stamp: $stamp, tty: $tty, evidence: $evidence}' > "$temporary"; then
+    rm -f "$temporary"; return 1
+  fi
+  mv -f "$temporary" "$cache"
   printf 'ghostty:%s\n' "$id"
 }
 
@@ -137,37 +145,138 @@ ghostty_unique_by_kind() {
   printf '%s\n' "${hits[0]}"
 }
 
-# Finds the terminal behind a TTY: Ghostty exposes no TTY/PID, so briefly report a unique
-# working directory via OSC 7 (invisible, unlike a title), look it up, then restore it.
+# Legacy caller discovery briefly reports a unique OSC 7 directory, then restores it.
+# Protocol 2 separately verifies the selected pane's TTY and foreground CLI.
 # Runs only when the caller has no binding yet; ghostty_bind caches the result.
 ghostty_probe() {
-  local tty="$1" tok="/crosstalk-probe-$$-$RANDOM" before rows id="" wd="" orig i
+  local tty="$1"
   [[ "$tty" =~ ^ttys[0-9]+$ ]] && [ -w "/dev/$tty" ] || return 1
-  before=$(ghostty_rpc wd-list) || return 1
-  printf '\033]7;file://%s%s\033\\' "$(hostname)" "$tok" > "/dev/$tty" || return 1
-  for i in 1 2 3 4 5 6 7 8 9 10; do
-    rows=$(ghostty_rpc wd-list) && id=$(awk -F'\t' -v t="$tok" '$2 == t {print $1}' <<< "$rows")
-    [ -z "$id" ] || break
-    sleep 0.1
-  done
-  [ -n "$id" ] && orig=$(awk -F'\t' -v i="$id" '$1 == i {print $2}' <<< "$before")
-  # Never leave the probe path behind; a pane that had no directory gets the caller's.
-  orig=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "${orig:-$PWD}")
-  printf '\033]7;file://%s%s\033\\' "$(hostname)" "$orig" > "/dev/$tty"
-  [ "$(grep -c . <<< "$id")" -eq 1 ] || return 1
-  printf '%s\n' "$id"
+  python3 - "$tty" "${BASH_SOURCE[0]}" "${CROSSTALK_CONFIG_DIR:-$HOME/.claude/crosstalk}" <<'PYPROBE'
+import fcntl, json, os, signal, subprocess, sys, time, urllib.parse, uuid
+from pathlib import Path
+
+tty, script, config = sys.argv[1:]
+root = Path(config) / 'ghostty'
+root.mkdir(mode=0o700, parents=True, exist_ok=True)
+lock_path = root / ('probe-' + tty + '.lock')
+record = root / ('probe-' + tty + '.json')
+fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+deadline = time.monotonic() + 3
+while True:
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        break
+    except BlockingIOError:
+        if time.monotonic() >= deadline:
+            sys.exit('ERROR: caller TTY probe is busy')
+        time.sleep(.05)
+if record.exists() or record.is_symlink():
+    sys.exit('ERROR: an interrupted TTY probe needs doctor inspection before another probe')
+
+def rows():
+    child = subprocess.Popen(['/bin/bash', '-c', 'source "$1"; ghostty_rpc wd-list',
+                              'crosstalk-probe', script], stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True, start_new_session=True)
+    try:
+        output, _ = child.communicate(timeout=2)
+    except BaseException:
+        try:
+            os.killpg(child.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        child.communicate()
+        raise
+    if child.returncode:
+        raise RuntimeError('Cannot read terminal directories')
+    return dict(line.split('\t', 1) for line in output.splitlines() if '\t' in line)
+
+def report(path):
+    with open('/dev/' + tty, 'w') as device:
+        device.write('\x1b]7;file://' + os.uname().nodename + urllib.parse.quote(path) + '\x1b\\')
+        device.flush()
+
+def interrupted(signum, frame):
+    raise RuntimeError('TTY probe interrupted')
+
+before, token, selected, touched = {}, '/crosstalk-probe-' + uuid.uuid4().hex, None, False
+try:
+    before = rows()
+    # Keep the pre-probe mapping for diagnosis after SIGKILL, when no finally can run.
+    temporary = record.with_suffix('.tmp-' + uuid.uuid4().hex)
+    with open(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as out:
+        json.dump({'tty': tty, 'token': token, 'before': before, 'fallback': os.getcwd(), 'pid': os.getpid()}, out)
+    os.replace(temporary, record)
+    signal.signal(signal.SIGTERM, interrupted)
+    signal.signal(signal.SIGINT, interrupted)
+    touched = True
+    report(token)
+    probe_deadline = time.monotonic() + 3
+    for _ in range(10):
+        if time.monotonic() >= probe_deadline:
+            raise RuntimeError('TTY probe timed out')
+        matches = [key for key, value in rows().items() if value == token]
+        if len(matches) == 1:
+            selected = matches[0]
+            break
+        if len(matches) > 1:
+            raise RuntimeError('Ambiguous probe response')
+        time.sleep(.1)
+    if not selected:
+        raise RuntimeError('Caller pane did not acknowledge TTY probe')
+except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
+    print('ERROR: ' + str(error), file=sys.stderr)
+    selected = None
+finally:
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    restored = not touched
+    if touched:
+        target = selected
+        if target is None:
+            try:
+                matches = [key for key, value in rows().items() if value == token]
+                target = matches[0] if len(matches) == 1 else None
+            except (OSError, RuntimeError, subprocess.TimeoutExpired):
+                pass
+        original = before.get(target) if target else None
+        report(original or os.getcwd())
+        if target:
+            try:
+                for _ in range(5):
+                    if rows().get(target) == (original or os.getcwd()):
+                        restored = True
+                        break
+                    time.sleep(.05)
+            except (OSError, RuntimeError, subprocess.TimeoutExpired):
+                pass
+    if restored:
+        record.unlink(missing_ok=True)
+    os.close(fd)
+if selected:
+    print(selected)
+else:
+    sys.exit(1)
+PYPROBE
 }
 
 ghostty_self() {
-  local context pid device id cache stamp
+  local context pid device id cache stamp evidence
   if [ -n "${CROSSTALK_SURFACE_ID:-}" ]; then
     id=$(ghostty_id "$CROSSTALK_SURFACE_ID") || return
     ghostty_rpc exists "$id" >/dev/null || return
   else
     context=$(ghostty_caller) || return
     IFS=$'\t' read -r pid device stamp <<< "$context"
+    if [ "${CROSSTALK_STRICT_IDENTITY:-0}" = 1 ] && [ "$device" = codex ]; then
+      echo "ERROR: Codex protocol 2 commands require the current pane's explicit CROSSTALK_SURFACE_ID; a resumed thread cache is not address evidence" >&2
+      return 1
+    fi
     cache="${CROSSTALK_CONFIG_DIR:-$HOME/.claude/crosstalk}/ghostty/bind-$pid.json"
     id=$(jq -r --arg stamp "$stamp" --arg tty "$device" 'select(.stamp == $stamp and .tty == $tty) | .id' "$cache" 2>/dev/null || true)
+    evidence=$(jq -r '.evidence // "legacy"' "$cache" 2>/dev/null || true)
+    if [ "${CROSSTALK_STRICT_IDENTITY:-0}" = 1 ] && [ "$evidence" != explicit ] && [ "$evidence" != probe ]; then
+      id=""
+    fi
     # A cached pane that is gone (e.g. `codex resume` in a new pane) is re-resolved, not an error.
     if [ -n "$id" ] && ghostty_id "$id" >/dev/null && ghostty_rpc exists "$id" >/dev/null 2>&1; then
       :
@@ -175,12 +284,64 @@ ghostty_self() {
       # Probe the caller's own TTY first (exact). Codex has no TTY of its own (shared daemon),
       # so it falls back to a label written by `setup` from any pane, matched by CLI kind.
       # shortcut: two same-kind Codex panes in one cwd still need bind <ID>.
-      id=$(ghostty_probe "$device") || id=$(ghostty_unique_by_kind "$pid") || { ghostty_rpc find-cwd "$PWD"; return 1; }
-      ghostty_bind "$id"
+      evidence=probe
+      if ! id=$(ghostty_probe "$device"); then
+        if [ "${CROSSTALK_STRICT_IDENTITY:-0}" = 1 ]; then
+          echo "ERROR: no exact caller address; complete a handshake in the selected pane" >&2
+          return 1
+        fi
+        evidence=legacy
+        id=$(ghostty_unique_by_kind "$pid") || { ghostty_rpc find-cwd "$PWD"; return 1; }
+      fi
+      ghostty_bind "$id" "$evidence"
       return
     fi
   fi
   printf 'ghostty:%s\n' "$id"
+}
+
+ghostty_identity() {
+  local surface device cli=""
+  if [ "$#" -gt 0 ]; then
+    surface="ghostty:$(ghostty_id "$1")" || return
+  else
+    surface=$(CROSSTALK_STRICT_IDENTITY=1 ghostty_self) || return
+    cli="${CODEX_THREAD_ID:-}"
+  fi
+  device=$(ghostty_rpc tty "${surface#ghostty:}") || return
+  python3 - "$surface" "$device" "$cli" <<'PYIDENTITY'
+import json, os, re, subprocess, sys
+surface, device, cli = sys.argv[1:]
+if not re.fullmatch(r'/dev/(ttys[0-9]+|pts/[0-9]+)', device):
+    sys.exit('ERROR: invalid terminal TTY')
+try:
+    # Ghostty's pid can be a login wrapper; ps exposes the TTY's actual foreground group.
+    result = subprocess.run(['ps', '-t', device.removeprefix('/dev/'), '-o',
+                             'pid=,pgid=,tpgid=,stat=,comm='], capture_output=True,
+                            text=True, timeout=2, check=True)
+    candidates = []
+    for line in result.stdout.splitlines():
+        row = line.split(None, 4)
+        if len(row) != 5 or row[1] != row[2] or not row[2].isdigit() or int(row[2]) <= 1:
+            continue
+        if 'T' in row[3] or 'Z' in row[3]:
+            continue
+        name = os.path.basename(row[4])
+        kind = {'claude': 'claude', 'claude.exe': 'claude', 'codex': 'codex',
+                'agy': 'antigravity', 'antigravity': 'antigravity'}.get(name)
+        if kind:
+            candidates.append((row[0], kind))
+    if len(candidates) != 1:
+        raise RuntimeError('Foreground TTY group does not contain exactly one supported CLI')
+    pid, kind = candidates[0]
+    stamp = subprocess.run(['ps', '-o', 'lstart=', '-p', pid], capture_output=True, text=True, timeout=2, check=True).stdout.strip()
+    if not stamp:
+        raise RuntimeError('Foreground CLI disappeared')
+    print(json.dumps({'surface_id': surface, 'kind': kind, 'cli_session_id': cli,
+                      'process_id': pid, 'process_start': stamp}))
+except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+    sys.exit('ERROR: cannot verify foreground CLI: ' + str(error))
+PYIDENTITY
 }
 
 ghostty_label_path() {
@@ -208,7 +369,7 @@ ghostty_get_label() {
 }
 
 ghostty_launch() {
-  local kind="${1:?kind required}" self id binary ready prompt command child binding launcher max_wait executable
+  local kind="${1:?kind required}" self id binary ready prompt command child binding launcher max_wait executable runtime transport config instructions startup
   local cli_args=()
   local approval="${2:-}"
   if [ "$#" -gt 2 ] || { [ -n "$approval" ] && [ "$approval" != --auto-approve ]; }; then
@@ -233,29 +394,41 @@ ghostty_launch() {
   self=$(self_surface) || return
   id=$(ghostty_id "$self") || return
   ready=$(mktemp "${TMPDIR:-/tmp}/crosstalk-ready.XXXXXXXX") || return
+  startup=$(mktemp /tmp/ct-startup.XXXXXXXX) || { rm -f "$ready"; return 1; }
   binding="$ready.surface"
   launcher="$ready.launch"
-  # The first real AI turn acknowledges startup; a title/label alone is not readiness.
-  printf -v prompt 'printf ready > %q' "$ready"
-  # Codex tool shells don't inherit CROSSTALK_SURFACE_ID, so bind this pane to its session once.
-  [ "$kind" != codex ] || prompt="~/.claude/scripts/crosstalk_bridge.sh bind __SID__ >/dev/null && $prompt"
-  prompt="Crosstalk startup check. Run exactly: $prompt . Then say Crosstalk ready and finish this turn. Do not modify project files. For later [Crosstalk] Question/Reply or 질문/답변 previews, read ~/.claude/crosstalk/mailbox.md and run ~/.claude/scripts/crosstalk receive without an ID. Process only the returned body and use its returned ID for reply --summary. Drain pending messages one at a time. Do not answer the preview directly or print protocol IDs. Legacy messages may still name task files."
+  runtime=$(python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve().with_name("crosstalk"))' "${BASH_SOURCE[0]}")
+  transport="${runtime}_bridge.sh"
+  config="${CROSSTALK_CONFIG_DIR:-$HOME/.claude/crosstalk}"
+  # The startup prompt runs inside the actual CLI; the bridge never recursively calls mailbox.
+  # Expansions in generated commands belong to the target CLI, not this launcher.
+  # shellcheck disable=SC2016
+  printf -v prompt 'export CROSSTALK_CONFIG_DIR=%q CROSSTALK_SURFACE_ID=__SID__; %q bind __SID__ >/dev/null && CHALLENGE=$(%q session challenge --surface __SID__ --kind %q | python3 -c %q) && %q session bind --challenge "$CHALLENGE" --kind %q --protocol 2 >/dev/null && printf ready > %q && rm -f %q' \
+    "$config" "$transport" "$runtime" "$kind" 'import json,sys; print(json.load(sys.stdin)["challenge"])' "$runtime" "$kind" "$ready" "$startup"
+  printf -v instructions 'env CROSSTALK_CONFIG_DIR=%q CROSSTALK_SURFACE_ID=__SID__ %q capabilities --json' "$config" "$runtime"
+  prompt="Crosstalk startup check. Run exactly: $prompt . Then say Crosstalk ready and finish this turn. Do not modify project files. For later [Crosstalk] notifications, run $instructions and read its mailbox_instructions path. Explicitly supply these environment values on every mailbox tool command in this pane; after resume elsewhere complete a new address handshake. Receive one message at a time, process only its returned body, and use its lease token when replying or acknowledging. Do not answer previews directly. Legacy messages may still name task files."
   # The child waits for its exact ID before starting the CLI (same cwd is now ambiguous).
   # Keep the program in a private script: Ghostty only parses an executable and one path.
   (umask 077
-    printf '#!/bin/bash\nset -euo pipefail\n' > "$launcher"
-    printf 'p=%q\n' "$prompt" >> "$launcher"
-    printf 'for i in {1..100}; do if [ -s %q ]; then export CROSSTALK_SURFACE_ID="$(cat %q)"; rm -f %q "$0"; exec ' "$binding" "$binding" "$binding" >> "$launcher"
-    printf '%q ' "$binary" ${cli_args[@]+"${cli_args[@]}"} >> "$launcher"
-    printf '"${p//__SID__/$CROSSTALK_SURFACE_ID}"' >> "$launcher"
-    printf '; fi; sleep 0.1; done; echo "Crosstalk launch binding timed out" >&2; rm -f "$0"; exit 1\n' >> "$launcher"
+    # shellcheck disable=SC2016
+    {
+      printf '#!/bin/bash\nset -euo pipefail\n'
+      printf 'unset CODEX_THREAD_ID\n'
+      printf 'export CROSSTALK_CONFIG_DIR=%q\n' "$config"
+      printf 'p=%q\n' "$prompt"
+      printf 'for i in {1..100}; do if [ -s %q ]; then export CROSSTALK_SURFACE_ID="$(cat %q)"; ' "$binding" "$binding"
+      printf 'printf "%%s\\n" "${p//__SID__/$CROSSTALK_SURFACE_ID}" > %q; rm -f %q "$0"; exec ' "$startup" "$binding"
+      printf '%q ' "$binary" ${cli_args[@]+"${cli_args[@]}"}
+      printf '%q' "Crosstalk startup check. Read $startup."
+      printf '; fi; sleep 0.1; done; echo "Crosstalk launch binding timed out" >&2; rm -f %q "$0"; exit 1\n' "$startup"
+    } > "$launcher"
   )
   printf -v command '/bin/bash %q' "$launcher"
-  child=$(ghostty_rpc split "$id" "$PWD" "$command" "$PATH") || { rm -f "$ready" "$launcher"; return 1; }
+  child=$(ghostty_rpc split "$id" "$PWD" "$command" "$PATH") || { rm -f "$ready" "$launcher" "$startup"; return 1; }
   child="ghostty:$child"
-  printf '%s\n' "$child" > "$binding"
   ghostty_label "$child" "$kind" || return
   printf '%s\n' "$ready" > "$(ghostty_label_path "$child").ready"
+  printf '%s\n' "$child" > "$binding"
   echo "STATE: launched surface=$child kind=$kind" >&2
   ghostty_wait_ready "$child" || return
   echo "$child"

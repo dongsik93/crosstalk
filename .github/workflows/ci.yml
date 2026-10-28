@@ -1,0 +1,38 @@
+name: Reliability checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ['3.11', '3.12', '3.13', '3.14']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install shell tools
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = macOS ]; then
+            brew install jq shellcheck
+          else
+            sudo apt-get update
+            sudo apt-get install -y jq shellcheck
+          fi
+      - name: Syntax and shell checks
+        run: |
+          /bin/bash -n assets/scripts/crosstalk_bridge.sh
+          /bin/bash -n assets/scripts/crosstalk_ghostty.sh
+          shellcheck -S warning assets/scripts/crosstalk_bridge.sh assets/scripts/crosstalk_ghostty.sh
+          python -m compileall -q assets/scripts tests
+      - name: Isolated CLI, database, and Git tests
+        shell: bash
+        run: |
+          for suite in tests/test_*.py; do
+            python "$suite"
+          done

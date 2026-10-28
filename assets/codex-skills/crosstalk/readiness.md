@@ -1,34 +1,62 @@
-# $crosstalk readiness
+# Crosstalk protocol-2 readiness
 
-Use the installed bridge, never a direct cmux check:
+For status/empty invocation, inspect only. Do not launch, label, challenge, bind, receive, retry or recover merely to display state.
 
 ```bash
+CT="$HOME/.claude/scripts/crosstalk"
 BRIDGE="$HOME/.claude/scripts/crosstalk_bridge.sh"
-[ -x "$BRIDGE" ] || { echo 'Crosstalk bridge missing: run /crosstalk:install'; exit 1; }
-BACKEND=$("$BRIDGE" backend)
-SELF=$("$BRIDGE" self)
-"$BRIDGE" label "$SELF" codex
-"$BRIDGE" list-peers
+CONFIG_ROOT="${CROSSTALK_CONFIG_DIR:-$HOME/.claude/crosstalk}"
+"$CT" capabilities --json
+"$CT" doctor --offline
+"$BRIDGE" backend
 ```
 
-For an empty invocation, show backend, caller ID, and labelled peers. Do not launch an AI just to show status.
+On Ghostty require protocol 2 and a healthy installation. Read the mailbox instruction path returned by capabilities. A schema migration or partial installation is an explicit upgrade task, not a side effect of readiness. Use the same `CROSSTALK_CONFIG_DIR` in both participants. On cmux retain the existing launch/setup and RUN_ID file/ping flows.
 
-For a topic on Ghostty, prepare the requested peer (Claude by default; set PEER_KIND=antigravity if the user explicitly requests agy):
+## Bind the Ghostty caller
 
-```bash
-PEER=$("$BRIDGE" ensure-peer codex "${PEER_KIND:-claude}")
-```
-
-This reuses one labelled peer in the caller's tab or splits right and launches the requested CLI in the same directory. It waits for a real startup acknowledgement. On timeout, stop and report the existing pane's login/trust prompt; never launch another copy or bypass permissions. Then continue the requested flow automatically.
-
-On cmux, keep the existing launch/setup flow if no peers exist.
-
-If `self` fails, preserve a supplied topic with `pending-save` and show the bridge error. Do not guess the focused pane. Codex cannot use the TTY probe (its tool commands run in a shared daemon), so its initial Ghostty binding requires a unique working directory or a unique codex-labelled pane; if ambiguous, show the candidate IDs/titles and have the user select the current CLI. If another pane already ran `/crosstalk:setup`, its handshake has bound this pane, or the labels resolve it by CLI kind, with no bind. Otherwise run `bridge bind ghostty:<UUID>` from that CLI once. An explicit `CROSSTALK_SURFACE_ID=ghostty:<UUID>` remains available for one-off calls. Do not start cmux because an environment variable is missing. IDs are available through:
+Use `bridge strict-self`, which accepts exact caller evidence and refuses label/cwd fallback. Claude/agy may find their pane through an OSC 7 TTY probe. Codex tool shells use a shared daemon, so process ancestry is not pane proof. If strict identity is unavailable, show candidates and have the user select the intended pane; never guess focus, title, cwd or kind. Inspect candidates with:
 
 ```bash
 osascript -e 'tell application "Ghostty" to get {id, name, working directory} of every terminal'
 ```
 
-Ghostty uses the SQLite mailbox and send/receive/reply for new discussions. See `mailbox.md`. Existing file/ping runs can still finish. Screen capture, UI footer detection, and screen transport are unavailable. Do not call `wait-ready` or `wait-turn` on Ghostty; `ensure-peer` handles startup.
+From the selected CLI itself, `bridge bind ghostty:<UUID>` records legacy transport cache only. Complete a protocol-2 session challenge/bind in that same CLI; the exact setup sequence is below (Claude also exposes `/crosstalk:setup`). A transport bind or label alone does not create a logical session. Do not execute another participant's bind for it. An existing verified logical binding may be reused only with fresh exact current-invocation surface context. A resumed CLI needs explicit rebind of the intended logical session, expected generation, and a fresh target challenge; do not silently adopt its old work.
 
-Before creating any new Ghostty peer (Claude, Codex, agy), ask whether to keep its existing CLI permission settings (default) or use --auto-approve for this launch only. Codex maps to --yolo (approvals and sandbox bypass); Claude/agy map to --dangerously-skip-permissions. Apply only after explicit user choice, never because startup timed out. Do not save a global preference or change an existing peer's permissions.
+Codex requires exact current-invocation surface context on **every** protocol-2 tool call. Its shared tool daemon may omit parent environment, and `CODEX_THREAD_ID` plus a saved bridge binding cannot distinguish the same thread resumed in another live pane. Prefix each invocation (or explicitly export in that same tool shell):
+
+```bash
+env CROSSTALK_CONFIG_DIR="<SHARED_CONFIG_ROOT>" CROSSTALK_SURFACE_ID="ghostty:<CURRENT_SELECTED_UUID>" \
+  <ABSOLUTE_CROSSTALK_RUNTIME> receive
+```
+
+The UUID must come from this execution's targeted launch/handshake or explicit user selection. Do not reconstruct it from a thread cache, kind, cwd, or an old resumed conversation. After restart/resume, reselect and complete the new target handshake before acting; do not reuse an inherited stale surface value. Replace `receive` with the needed send/reply/ack/renew/status command and preserve these same per-call environment arguments. A plain `bridge bind` only updates legacy transport cache and does not satisfy strict Codex identity by itself.
+
+For a new participant without an existing verified binding, execute in that participant's own CLI:
+
+```bash
+# SELF is the current execution's exact selected/probed address, never an old cache.
+# Repeat these exports in every new Codex tool shell; KIND is the actual CLI kind.
+export CROSSTALK_CONFIG_DIR="$CONFIG_ROOT" CROSSTALK_SURFACE_ID="$SELF"
+"$BRIDGE" bind "$SELF"
+CHALLENGE=$("$CT" session challenge --surface "$SELF" --kind "$KIND") || exit 1
+NONCE=$(printf '%s' "$CHALLENGE" | jq -er '.challenge') || exit 1
+"$CT" session bind --challenge "$NONCE" --kind "$KIND" --protocol 2
+"$CT" session status
+```
+
+For an existing peer, create `session challenge --surface <EXACT_SURFACE> --kind <KIND> --notify` and let that target execute its own transport/protocol bind. Check session status before sending. For an authorized transfer, include `--session-id <LOGICAL_ID> --expected-generation <N>` on challenge, then the target uses `session rebind --challenge <NONCE> --kind <KIND> --protocol 2 --confirm-transfer`. If using `--notify` for that transfer, also supply challenge's `--confirm-transfer` only after user authorization. Keep nonce/token values out of ordinary conversation.
+
+## Prepare a peer for a requested topic
+
+After the caller is bound, use its actual kind (Codex=`codex`, Claude=`claude`) and the requested peer (other kind by default, `antigravity` only when requested):
+
+```bash
+PEER=$("$BRIDGE" ensure-peer codex "${PEER_KIND:-claude}")
+```
+
+The bridge reuses an existing candidate or opens an exact native split and waits for startup. A new launch completes its protocol-2 bind before readiness. Existing labelled panes still need protocol-2 binding: use the setup challenge flow and wait for the target CLI to complete it. Check the registry before sending a topic. More than one matching peer requires explicit selection, never a first-pane fallback.
+
+On timeout retain the pending pane; show login/trust/busy state only when observed, otherwise report it as a possible cause. Do not launch another copy, increase permissions, or send a topic before handshake. Use default CLI permissions unless the user already explicitly selected the per-launch auto-approval option in mailbox.md.
+
+If preparation fails, preserve the supplied topic with bridge `pending-save`. Resume that topic after readiness; message recovery is a separate `recover` operation. Do not move users to cmux because Ghostty identity failed. Do not use screen capture, `wait-ready` or `wait-turn` for Ghostty; those are legacy cmux paths.

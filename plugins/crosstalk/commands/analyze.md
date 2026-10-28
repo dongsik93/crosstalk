@@ -6,9 +6,9 @@ argument-hint: <분석 주제 / 자료 본문>
 
 # /crosstalk:analyze (사회자 없는 독립 분석 + 조건부 핑퐁)
 
-Incoming `[Crosstalk] 질문:/답변:/Question:/Reply:` previews: read `~/.claude/crosstalk/mailbox.md` and call ID-less `receive`. Do not answer the preview directly or infer an ID from it. Process the actual DB row, then check for the next pending message.
+Incoming `[Crosstalk] 질문:/답변:/Question:/Reply:` previews: run `~/.claude/scripts/crosstalk capabilities --json`, require protocol 2 and healthy installation, and read its returned mailbox instruction path and call ID-less `receive`. Do not answer the preview directly or infer an ID from it. Process the actual DB row, then check for the next pending message.
 
-For a new Ghostty request (bridge `backend` returns `ghostty`) or an incoming `[crosstalk] mailbox <ID>`, read `~/.claude/crosstalk/mailbox.md` and use that send/receive/reply workflow instead of the legacy steps below. Existing RUN_ID triggers and cmux runs still follow the legacy steps.
+For a new Ghostty request (bridge `backend` returns `ghostty`) or an incoming `[crosstalk] mailbox <ID>`, run `~/.claude/scripts/crosstalk capabilities --json`, require protocol 2 and healthy installation, and read its returned mailbox instruction path and use that lease/reply/ack workflow instead of the legacy steps below. Existing RUN_ID triggers and cmux runs still follow the legacy steps.
 
 ## 컨셉
 
@@ -315,16 +315,14 @@ jq --argjson r "$NEXT_ROUND" '.current_round = $r' "$MANIFEST" > "$TMP" && mv "$
 각 응답 파일에서 verdict를 *bridge로 추출*한다 (LLM 자유 해석 X — deterministic):
 
 ```bash
-declare -A VERDICTS REASONS CONFIDENCES
+VERDICTS_JSON='{}'
 for agent in "${AGENTS[@]}"; do
   RESP="$RUN_DIR/responses/${agent}-r${ROUND_PADDED}.md"
-  eval "$(~/.claude/scripts/crosstalk_bridge.sh extract-verdict "$RESP" \
-    | sed -E 's/^/AG_/')"
-  # AG_verdict / AG_reason / AG_confidence 변수가 채워짐
-  VERDICTS["$agent"]="$AG_verdict"
-  REASONS["$agent"]="$AG_reason"
-  CONFIDENCES["$agent"]="$AG_confidence"
+  RESULT=$(~/.claude/scripts/crosstalk_bridge.sh extract-verdict "$RESP" --json) || exit 1
+  VERDICTS_JSON=$(jq --arg agent "$agent" --argjson result "$RESULT" '. + {($agent): $result}' <<< "$VERDICTS_JSON")
 done
+# Read .[agent].verdict, .reason, .confidence with jq; values are data, never shell code.
+
 ```
 
 종료 판정:

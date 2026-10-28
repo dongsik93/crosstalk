@@ -13,7 +13,9 @@ BRIDGE="$HOME/.claude/scripts/crosstalk_bridge.sh"
 BACKEND=$("$BRIDGE" backend)
 ```
 
-If `BACKEND=ghostty`, run `"$BRIDGE" ensure-peer claude codex` and finish. From a Codex caller use `ensure-peer codex claude`. If the user explicitly requests agy, use `ensure-peer <caller-kind> antigravity` instead (agy is an alias). This creates a native right split in the current directory, or reuses the labelled peer in this tab. It waits for the peer's startup acknowledgement; on timeout, report the existing pane's login/trust prompt and do not create a duplicate. Do not execute any cmux steps below on Ghostty.
+If `BACKEND=ghostty`, first run `~/.claude/scripts/crosstalk capabilities --json`, require protocol 2 and healthy installation, and follow `/crosstalk:setup` for the caller's verified binding. Read the returned `mailbox_instructions` path. Keep CLI default permissions unless the user explicitly selected auto-approval for this launch.
+
+Then run `"$BRIDGE" ensure-peer claude codex`; a Codex caller uses `ensure-peer codex claude`, and an explicitly requested agy peer uses `antigravity`. A new native split receives its exact address and config root and must complete protocol-2 binding before readiness. Codex must explicitly supply that current target as `CROSSTALK_SURFACE_ID` and shared root as `CROSSTALK_CONFIG_DIR` on every later protocol-2 tool invocation; its shared daemon may omit inherited environment, and a thread cache alone is refused. After resume/restart reselect the target and handshake rather than retaining an old surface. An existing labelled candidate still needs the setup challenge if it is not in `session status` as bound. Never treat its label as readiness. On timeout preserve and reuse the pending pane, report the observed error, and do not create a duplicate or bypass permissions. Return only after checking the logical binding, or report incomplete preparation. Do not execute cmux steps below on Ghostty.
 
 ## cmux backend only
 

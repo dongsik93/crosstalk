@@ -37,3 +37,8 @@ Thumbs.db
 .env.local
 .env.*.local
 secrets/
+
+# Local execution evidence and Python bytecode
+.dsgoal/
+__pycache__/
+*.pyc

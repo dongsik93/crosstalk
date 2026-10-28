@@ -65,6 +65,7 @@
 #                                                       원문 파일은 변경하지 않음. 초과 시 stderr에 WARN 출력
 
 set -euo pipefail
+umask 077
 
 # Target IDs carry their backend so callbacks work even from a different environment.
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/crosstalk_ghostty.sh"
@@ -245,6 +246,20 @@ esac
 case "$CMD" in
   backend)
     terminal_backend
+    ;;
+
+  strict-self)
+    [ "$(terminal_backend)" = ghostty ] || { echo "ERROR: mailbox requires Ghostty" >&2; exit 1; }
+    CROSSTALK_STRICT_IDENTITY=1 ghostty_self
+    ;;
+
+  strict-identity)
+    [ "$(terminal_backend)" = ghostty ] || { echo "ERROR: mailbox requires Ghostty" >&2; exit 1; }
+    ghostty_identity
+    ;;
+
+  target-identity)
+    ghostty_identity "${1:?Ghostty terminal ID required}"
     ;;
 
   self)
@@ -523,7 +538,7 @@ case "$CMD" in
     ;;
 
   get-language)
-    CONFIG="${CROSSTALK_CONFIG:-$HOME/.claude/crosstalk/config.json}"
+    CONFIG="${CROSSTALK_CONFIG:-${CROSSTALK_CONFIG_DIR:-$HOME/.claude/crosstalk}/config.json}"
     LANG_VALUE=$(jq -r '.language // "en"' "$CONFIG" 2>/dev/null || echo "en")
     case "$LANG_VALUE" in
       en|ko) echo "$LANG_VALUE" ;;
@@ -534,18 +549,23 @@ case "$CMD" in
   pending-save)
     # cmux 외부 호출 시 topic 보존. 'crosstalk pending-save <topic>'
     TOPIC="${1:?topic required}"
-    PENDING_DIR="$HOME/.claude/crosstalk"
+    PENDING_DIR="${CROSSTALK_CONFIG_DIR:-$HOME/.claude/crosstalk}"
     mkdir -p "$PENDING_DIR"
     PENDING_FILE="$PENDING_DIR/pending.json"
     # jq -n 으로 안전하게 JSON 인코딩
-    jq -n --arg topic "$TOPIC" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-      '{topic: $topic, saved_at: $ts}' > "$PENDING_FILE"
-    echo "$PENDING_FILE"
+    PENDING_TEMP=$(mktemp "$PENDING_DIR/.pending.XXXXXXXX")
+    if jq -n --arg topic "$TOPIC" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      '{topic: $topic, saved_at: $ts}' > "$PENDING_TEMP" && mv "$PENDING_TEMP" "$PENDING_FILE"; then
+      echo "$PENDING_FILE"
+    else
+      rm -f "$PENDING_TEMP"
+      exit 1
+    fi
     ;;
 
   pending-load)
     # 저장된 topic 출력 (없으면 빈 출력 + exit 1)
-    PENDING_FILE="$HOME/.claude/crosstalk/pending.json"
+    PENDING_FILE="${CROSSTALK_CONFIG_DIR:-$HOME/.claude/crosstalk}/pending.json"
     if [ ! -f "$PENDING_FILE" ]; then
       exit 1
     fi
@@ -553,7 +573,7 @@ case "$CMD" in
     ;;
 
   pending-clear)
-    PENDING_FILE="$HOME/.claude/crosstalk/pending.json"
+    PENDING_FILE="${CROSSTALK_CONFIG_DIR:-$HOME/.claude/crosstalk}/pending.json"
     [ -f "$PENDING_FILE" ] && rm -f "$PENDING_FILE"
     echo "OK pending cleared"
     ;;
@@ -601,7 +621,7 @@ case "$CMD" in
 
     if [ -d "$CROSSTALK_ROOT" ]; then
       # find -mtime +N : N일 *초과* 경과한 것
-      for D in $(find "$CROSSTALK_ROOT" -maxdepth 1 -type d -name 'run-*' -mtime +"$GC_DAYS" 2>/dev/null); do
+      while IFS= read -r -d '' D; do
         if [ "$GC_DRY" = "1" ]; then
           echo "[dry-run] would remove: $D"
         else
@@ -609,12 +629,12 @@ case "$CMD" in
           echo "removed: $D"
         fi
         DELETED=$((DELETED + 1))
-      done
+      done < <(find "$CROSSTALK_ROOT" -maxdepth 1 -type d -name 'run-*' -mtime +"$GC_DAYS" -print0 2>/dev/null)
       KEPT=$(find "$CROSSTALK_ROOT" -maxdepth 1 -type d -name 'run-*' 2>/dev/null | wc -l | tr -d ' ')
     fi
 
     # pending.json 도 30일 지났으면 정리 (오래된 보존 topic)
-    PENDING_FILE="$HOME/.claude/crosstalk/pending.json"
+    PENDING_FILE="${CROSSTALK_CONFIG_DIR:-$HOME/.claude/crosstalk}/pending.json"
     if [ -f "$PENDING_FILE" ] && find "$PENDING_FILE" -mtime +"$GC_DAYS" 2>/dev/null | grep -q .; then
       if [ "$GC_DRY" = "1" ]; then
         echo "[dry-run] would remove stale pending: $PENDING_FILE"
@@ -627,106 +647,8 @@ case "$CMD" in
     echo "summary: deleted=$DELETED kept=$KEPT (cutoff=${GC_DAYS}d, last=$HOME/.crosstalk/last 보존)"
     ;;
 
-  extract-verdict)
-    # 'crosstalk extract-verdict <response-file>'
-    # 응답 본문에서 verdict 마커와 신뢰도를 정규식으로 뽑는다.
-    # 사회자(LLM)의 자유 해석 대신 deterministic 판정용.
-    #
-    # 출력 형식 (key=value, 한 줄씩):
-    #   verdict=AGREE | RESPECT_DISAGREE | DISAGREE | NONE
-    #   reason=<RESPECT_DISAGREE/DISAGREE의 사유, 없으면 빈 줄>
-    #   confidence=high | medium | low | unknown
-    RESP_FILE="${1:?response file required}"
-    if [ ! -f "$RESP_FILE" ]; then
-      echo "ERROR: response file not found: $RESP_FILE" >&2
-      echo "Next: 'crosstalk_bridge.sh ping' 이후 응답 파일 경로 확인. \$RUN_DIR/responses/<agent>-r<NN>.md 형태." >&2
-      exit 1
-    fi
-
-    # 마지막에 등장하는 마커가 최종 의견 (반복 시 보수적으로 마지막 것)
-    VERDICT="NONE"
-    REASON=""
-    if grep -qE '\[AGREE\]' "$RESP_FILE"; then
-      VERDICT="AGREE"
-    fi
-    # RESPECT_DISAGREE가 AGREE보다 우선 (더 명시적)
-    if grep -qE '\[RESPECT_DISAGREE' "$RESP_FILE"; then
-      VERDICT="RESPECT_DISAGREE"
-      REASON=$(grep -oE '\[RESPECT_DISAGREE:[^]]*\]' "$RESP_FILE" | tail -1 | sed -E 's/^\[RESPECT_DISAGREE:[[:space:]]*//; s/\][[:space:]]*$//')
-    elif grep -qE '\[DISAGREE' "$RESP_FILE"; then
-      VERDICT="DISAGREE"
-      REASON=$(grep -oE '\[DISAGREE:[^]]*\]' "$RESP_FILE" | tail -1 | sed -E 's/^\[DISAGREE:[[:space:]]*//; s/\][[:space:]]*$//')
-    fi
-
-    # 신뢰도: "신뢰도: high" / "confidence: medium" 등
-    CONFIDENCE=$(grep -iE '신뢰도|confidence' "$RESP_FILE" \
-      | grep -oiE '(high|medium|low)' \
-      | head -1 | tr '[:upper:]' '[:lower:]')
-    [ -z "$CONFIDENCE" ] && CONFIDENCE="unknown"
-
-    printf 'verdict=%s\nreason=%s\nconfidence=%s\n' "$VERDICT" "$REASON" "$CONFIDENCE"
-    ;;
-
-  start-worktree)
-    # 'crosstalk start-worktree <RUN_ID> <AGENT>'
-    # 현재 git 레포 안에서 git worktree add. 새 브랜치 cowork/<RUN_ID>-<AGENT>.
-    # 출력: 생성된 worktree 절대 경로.
-    RUN_ID="${1:?run-id required}"
-    AGENT="${2:?agent required}"
-    validate_run_id "$RUN_ID" || exit 1
-    validate_agent "$AGENT" || exit 1
-
-    if ! git rev-parse --git-dir >/dev/null 2>&1; then
-      echo "ERROR: not in a git repository" >&2
-      echo "Next: git init 또는 git 레포 안에서 호출. 비-git 환경은 --no-worktree 옵션 사용." >&2
-      exit 1
-    fi
-
-    WORKTREES_ROOT="${CROSSTALK_ROOT:-/tmp/crosstalk}/worktrees/run-$RUN_ID"
-    mkdir -p "$WORKTREES_ROOT"
-    WT_DIR="$WORKTREES_ROOT/$AGENT"
-    BRANCH="cowork/${RUN_ID}-${AGENT}"
-
-    if [ -d "$WT_DIR" ]; then
-      echo "$WT_DIR"
-      exit 0
-    fi
-
-    if ! git worktree add -b "$BRANCH" "$WT_DIR" >/dev/null 2>&1; then
-      echo "ERROR: failed to create worktree at $WT_DIR" >&2
-      echo "Next: 브랜치 이름 충돌 확인 ('git branch -D $BRANCH'), 또는 worktrees 디렉토리 권한 확인." >&2
-      exit 1
-    fi
-    echo "$WT_DIR"
-    ;;
-
-  cleanup-worktrees)
-    # 'crosstalk cleanup-worktrees <RUN_ID>'
-    # run에 속한 모든 worktree 정리. 브랜치는 보존(사용자가 머지/검토할 수 있게).
-    RUN_ID="${1:?run-id required}"
-    validate_run_id "$RUN_ID" || exit 1
-
-    WORKTREES_ROOT="${CROSSTALK_ROOT:-/tmp/crosstalk}/worktrees/run-$RUN_ID"
-    if [ ! -d "$WORKTREES_ROOT" ]; then
-      echo "no worktrees for run-$RUN_ID"
-      exit 0
-    fi
-
-    REMOVED=0
-    if git rev-parse --git-dir >/dev/null 2>&1; then
-      for WT in "$WORKTREES_ROOT"/*; do
-        [ -d "$WT" ] || continue
-        if git worktree remove --force "$WT" >/dev/null 2>&1; then
-          echo "removed worktree: $WT"
-          REMOVED=$((REMOVED + 1))
-        else
-          echo "WARN: could not remove worktree (may be already gone): $WT" >&2
-        fi
-      done
-    fi
-
-    rmdir "$WORKTREES_ROOT" 2>/dev/null || true
-    echo "summary: removed=$REMOVED (브랜치는 보존 — 'git branch | grep cowork/$RUN_ID' 로 확인)"
+  extract-verdict|start-worktree|cleanup-worktrees)
+    python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/crosstalk_lib/legacy.py" "$CMD" "$@"
     ;;
 
   notify-stop)
@@ -780,8 +702,8 @@ case "$CMD" in
     LANG="${1:?language required (en|ko)}"
     case "$LANG" in en|ko) ;; *) echo "ERROR: invalid language '$LANG'" >&2; exit 1 ;; esac
 
-    DEST_RULES="$HOME/.claude/crosstalk/rules/$LANG"
-    DEST_PERSONAS="$HOME/.claude/crosstalk/personas/$LANG"
+    DEST_RULES="${CROSSTALK_CONFIG_DIR:-$HOME/.claude/crosstalk}/rules/$LANG"
+    DEST_PERSONAS="${CROSSTALK_CONFIG_DIR:-$HOME/.claude/crosstalk}/personas/$LANG"
     mkdir -p "$DEST_RULES" "$DEST_PERSONAS"
 
     # 비어있지 않으면 자가치유 불필요 (사용자 편집 보존). 단, 누락된 빌트인은 보충한다.
@@ -904,7 +826,7 @@ case "$CMD" in
 
     # VERSION 파일 단일 진실. 우선순위: 사용자 설치본 > 마켓 캐시 > unknown.
     BRIDGE_VERSION="unknown"
-    for V in "$HOME/.claude/crosstalk/VERSION" \
+    for V in "${CROSSTALK_CONFIG_DIR:-$HOME/.claude/crosstalk}/VERSION" \
              "$HOME/.claude/plugins/marketplaces/crosstalk/VERSION"; do
       [ -f "$V" ] && BRIDGE_VERSION=$(tr -d '[:space:]' < "$V") && break
     done

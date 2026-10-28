@@ -100,9 +100,9 @@ done
 📁 worktrees:    /tmp/crosstalk/worktrees/run-${RUN_ID}/
 
 worktree 정리하려면: 각 worktree에서 git status 확인 후
-  git worktree remove --force <path>
+  git worktree remove <path>
 또는 일괄:
-  ~/.claude/scripts/crosstalk_bridge.sh cleanup-worktrees ${RUN_ID}
+  ~/.claude/scripts/crosstalk_bridge.sh cleanup-worktrees ${RUN_ID} --confirm-stopped
 ```
 
 ## 주의
@@ -110,3 +110,5 @@ worktree 정리하려면: 각 worktree에서 git status 확인 후
 - **수동 정리 안전**: cowork-stop은 *신호만* 보낸다. 파일/커밋은 손대지 않음.
 - **peer가 stop 신호를 무시할 수도**: `/goal` 훅 구현에 따라. 그 경우 사용자가 peer pane에서 직접 Ctrl+C.
 - **여러 cowork 동시 실행 가능**: 각 RUN_ID 독립. RUN_ID 명시해서 stop.
+
+정리 전 모든 peer의 실제 종료를 확인합니다. stop 알림만으로 종료를 가정하지 않습니다. 소유권 미확인·dirty·ignored 파일·새 commit이 있는 worktree는 보존합니다.

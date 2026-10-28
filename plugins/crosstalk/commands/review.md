@@ -1,5 +1,5 @@
 ---
-description: Review a GitHub PR with peer AI CLI panes. Supports en/ko UI. Deep mode is experimental.
+description: Review a GitHub PR with peer AI CLI panes. Supports en/ko UI. Deep mode uses a fixed detached worktree.
 allowed-tools: Bash, AskUserQuestion, Read
 argument-hint: [--deep] [--rules <name>] [--persona <name>] [PR번호]
 ---
@@ -13,7 +13,7 @@ PR diff/branch를 자료로 공유하고, 사회자(Claude)가 turn-taking으로
 | 모드 | 자료 공유 | 시간 | 깊이 |
 |------|----------|------|------|
 | **빠른 (default)** | `gh pr diff` 결과를 임시 파일로 공유 | 5~10분 | hunk 위주 |
-| **깊은 (`--deep`)** | 현재 디렉토리를 PR 브랜치로 checkout | 15~30분 | caller 추적, 컨텍스트 |
+| **깊은 (`--deep`)** | 고정된 PR SHA의 별도 detached worktree | 15~30분 | caller 추적, 컨텍스트 |
 
 ## 전제 조건
 
@@ -109,46 +109,11 @@ PR_FILES=$(gh pr view "$PR_NUM" --json files --jq '.files[] | "\(.additions)+ \(
 
 Read 도구로 `$RULES_PATH`, `$PERSONA_PATH` 본문 메모리에 로드 — 이후 모든 토론 메시지에 주입.
 
-## 2단계: 깊은 모드 동의 확인 (deep만)
+## 2단계: 깊은 모드의 작업 경로
 
-```bash
-ORIG_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-HAS_CHANGES=false
-[ -n "$(git status --porcelain)" ] && HAS_CHANGES=true
-```
+깊은 모드는 원본 디렉터리의 브랜치·index·stash·작업 파일을 바꾸지 않는다. peer 선택 뒤 `crosstalk review prepare`가 별도 detached worktree와 고정 SHA diff를 준비한다. Git 객체와 worktree 메타데이터는 공유하므로 보안 샌드박스는 아니다.
 
-`AskUserQuestion`은 언어별로 표시:
-
-en:
-```
-header: Deep mode warning
-question: Deep mode checks out PR #${PR_NUM} in the current working directory.
-options:
-  - Continue
-  - Switch to fast mode
-  - Cancel
-```
-
-ko:
-```
-header: 깊은 모드 주의사항
-question: 깊은 모드는 현재 작업 디렉토리를 PR #${PR_NUM} 브랜치로 갈아탑니다.
-
-[현재 상태]
-- 브랜치: ${ORIG_BRANCH}
-- 작업 중 변경사항: ${HAS_CHANGES} (있으면 자동 stash → 종료 시 복원)
-
-[주의]
-- 모든 cmux pane이 같은 디렉토리에 있어야 합니다.
-- 토론 중 코드 수정/커밋/git 작업 금지.
-- 토론은 15~30분 소요됩니다.
-- 종료 시 자동으로 원래 브랜치 복귀.
-
-options:
-  - 진행
-  - 빠른 모드로 변경
-  - 취소
-```
+원본에서 브랜치를 바꾸거나 stash를 만들고 복원하는 절차를 실행하지 않는다. 중단 시에도 남은 review run을 조회하고 보존한다. 새 기능은 cmux review 전용이며 Ghostty review 지원을 뜻하지 않는다.
 
 ## 3단계: 모드별 자료 준비
 
@@ -165,16 +130,9 @@ else
 fi
 ```
 
-### 깊은 모드 (이 단계에서는 diff만 받는다 — checkout/stash는 4단계 뒤로 미룬다)
-```bash
-DIFF_PATH="/tmp/pr-${PR_NUM}-$(date +%Y%m%d-%H%M%S).diff"
-gh pr diff "$PR_NUM" > "$DIFF_PATH"
-DIFF_LINES=$(wc -l < "$DIFF_PATH" | tr -d ' ')
-# SHARED_LABEL/SHARED_INSTR/CURRENT_DIR 는 checkout 직후 4.5단계에서 확정.
-```
+### 깊은 모드
 
-> **중요**: 깊은 모드의 `git stash` + `gh pr checkout` 은 *peer 검증을 통과한 뒤*에 수행한다.
-> peer가 0개라 종료되는 경로에서 stash가 남아있는 사고를 막기 위함.
+이 단계에서는 자료를 받지 않는다. peer 선택 후 `review prepare`가 동일한 base/head snapshot에서 worktree와 diff를 함께 생성한다. 별도로 받은 최신 PR diff를 섞지 않는다.
 
 ## 4단계: 환경 스캔 + 상대 선택 (peer 검증 우선)
 
@@ -183,7 +141,7 @@ peer 검증 흐름:
 1. `~/.claude/scripts/crosstalk_bridge.sh list-peers` 로 후보 수집 (`unknown`/`shell` 제외).
 2. **후보가 0개**:
    - `cmux ping` 실패 → cmux 미실행/미설치 안내 후 종료.
-   - `cmux ping` 성공 → 사용자에게 안내 후 종료 (이 시점까지 stash/checkout 미수행, 정리할 것 없음):
+   - `cmux ping` 성공 → 사용자에게 안내 후 종료 (아직 review worktree를 만들지 않았으므로 정리할 것 없음):
      ```
      🛑 cmux split 안에 다른 AI pane(Codex/Antigravity)이 없어 PR 리뷰 토론을 시작할 수 없습니다.
 
@@ -195,56 +153,24 @@ peer 검증 흐름:
      슬래시 커맨드는 다른 슬래시 커맨드를 자동 호출하지 않는다.
 3. 후보가 1개 이상이면 `AskUserQuestion`으로 상대 선택.
 
-## 4.5단계: 깊은 모드 — checkout (peer 확정 후, 명시 restore)
+## 4.5단계: 깊은 모드 — 고정 snapshot 준비
 
-> ⚠️ **`--deep` 모드는 experimental 입니다.** 자동 복구를 신뢰하지 마세요.
-> 슬래시 커맨드는 여러 bash 호출에 걸쳐 실행되며, `trap`은 *현재 호출* 끝나면 사라집니다.
-> 따라서 trap에만 의존하지 않고, 9단계에서 `restore_branch`를 **명시적으로 호출**해야 합니다.
-> 자동 복구 실패 시 사용자가 손으로 복구할 수 있도록 *수동 복구 명령*을 출력합니다.
-
-깊은 모드일 때만, peer 선택까지 마친 *지금 시점*에 stash/checkout 수행:
+peer를 선택한 뒤 실행한다. `PEER_KIND`는 선택한 CLI 종류(`codex`, `antigravity`, `claude`)다. DB가 구버전이면 먼저 업그레이드 문서의 명시적 migration을 수행한다. 자동 migration이나 원본 경로 fallback은 하지 않는다.
 
 ```bash
 if [ "$MODE" = "deep" ]; then
-  STASH_REF=""
-  if $HAS_CHANGES; then
-    git stash push -u -m "crosstalk-review-${PR_NUM}-$(date +%s)"
-    STASH_REF=$(git stash list | head -1 | cut -d: -f1)
-  fi
-  gh pr checkout "$PR_NUM" || {
-    echo "ERROR: PR checkout 실패"
-    echo "  자동 복구 시도..."
-    [ -n "$STASH_REF" ] && git stash pop "$STASH_REF" 2>/dev/null || true
-    echo "  수동 복구가 필요하면:"
-    echo "    git checkout $ORIG_BRANCH"
-    [ -n "$STASH_REF" ] && echo "    git stash pop $STASH_REF"
-    exit 1
-  }
-  CURRENT_DIR=$(pwd)
-  SHARED_LABEL="현재 디렉토리: $CURRENT_DIR (PR 브랜치 체크아웃됨), diff 참조: $DIFF_PATH"
-  if [ "$LANGUAGE" = "ko" ]; then
-    SHARED_INSTR="현재 디렉토리($CURRENT_DIR)가 PR 브랜치입니다. grep/find/read로 자유롭게 분석. 코드 수정/커밋/git 작업 금지. 응답 출력 방법은 매 턴 메시지의 ═══ Transport ═══ 섹션이 알려준다 (file 모드: 응답 파일 1개 작성 + 화면에 DONE 한 줄)."
-  else
-    SHARED_INSTR="The current directory ($CURRENT_DIR) is checked out to the PR branch. You may inspect files freely, but do not modify code, commit, or run git operations. The only allowed write is the response file specified by each turn's Transport section."
-  fi
-
-  restore_branch() {
-    git checkout "$ORIG_BRANCH" 2>/dev/null || {
-      echo "⚠️  자동 브랜치 복귀 실패. 수동 실행 필요:"
-      echo "    git checkout $ORIG_BRANCH"
-    }
-    if [ -n "$STASH_REF" ]; then
-      git stash pop "$STASH_REF" 2>/dev/null || {
-        echo "⚠️  자동 stash 복구 실패. 수동 실행 필요:"
-        echo "    git stash pop $STASH_REF"
-      }
-    fi
-    echo "✓ 원래 브랜치(${ORIG_BRANCH}) 복귀 처리 완료"
-  }
-  # 같은 bash 호출 내 강제 종료 대비한 보조 안전망. 9단계 명시 호출이 1차 보장.
-  trap restore_branch EXIT INT TERM
+  REVIEW_JSON=$(~/.claude/scripts/crosstalk review prepare "$PR_NUM" --repo "$PWD" --peer "$PEER_KIND") || exit 1
+  REVIEW_RUN_ID=$(printf '%s' "$REVIEW_JSON" | jq -r '.run_id')
+  REVIEW_ROOT=$(printf '%s' "$REVIEW_JSON" | jq -r '.review_root')
+  REVIEW_HEAD=$(printf '%s' "$REVIEW_JSON" | jq -r '.head_sha')
+  REVIEW_BASE=$(printf '%s' "$REVIEW_JSON" | jq -r '.base_sha')
+  DIFF_PATH=$(printf '%s' "$REVIEW_JSON" | jq -r '.diff_path')
+  SHARED_LABEL="review_root=$REVIEW_ROOT reviewed_commit=$REVIEW_HEAD diff=$DIFF_PATH"
+  SHARED_INSTR="Read only the absolute review_root $REVIEW_ROOT and diff $DIFF_PATH. Before reviewing, verify git -C '$REVIEW_ROOT' rev-parse HEAD equals $REVIEW_HEAD. Every file and Git tool call must explicitly use this review_root. Include reviewed_commit=$REVIEW_HEAD and evidence paths in the response. Do not fall back to the original repository or change the worktree. Write the response only to the Transport response path."
 fi
 ```
+
+JSON 값은 데이터로 파싱하며 `eval`하지 않는다. 위 지시문에 경로를 삽입할 때 경로의 따옴표가 실행 코드가 되도록 조립하지 말고, 실제 도구 인수로 경로를 전달한다. review_root에 접근할 수 없는 peer는 접근 문제를 보고하고 중단한다. 원격 PR head가 나중에 달라져도 이 run은 고정한 SHA만 리뷰한다.
 
 ## 5단계: 임시 로그 + transport run
 
@@ -348,7 +274,9 @@ jq --arg phase review \
    --argjson round 1 \
    --argjson agents "$(printf '%s\n' "${AGENTS[@]}" | jq -R . | jq -s .)" \
    --argjson peers "$PEERS_JSON" \
-   '. + {mode: $phase, current_round: $round, agents: $agents, peers: $peers}' \
+   --arg review_run_id "${REVIEW_RUN_ID:-}" --arg review_root "${REVIEW_ROOT:-}" \
+   --arg reviewed_commit "${REVIEW_HEAD:-}" --arg diff_path "$DIFF_PATH" \
+   '. + {mode: $phase, current_round: $round, agents: $agents, peers: $peers, review_run_id: $review_run_id, review_root: $review_root, reviewed_commit: $reviewed_commit, diff_path: $diff_path}' \
    "$MANIFEST" > "$TMP" && mv "$TMP" "$MANIFEST"
 
 # 메시지 파일 작성 + 짧은 트리거 발송 (1:1이든 다자든 동일)
@@ -391,7 +319,7 @@ claude pane이 `[crosstalk] codex R1 done — RUN_ID=...` 메시지를 받으면
 
 Claude 본인도 같은 자료로 분석:
 - fast: `cat $DIFF_PATH` 또는 Read
-- deep: 현재 디렉토리에서 grep/find/read 자유
+- deep: 모든 조회에 `$REVIEW_ROOT` 절대 경로를 사용하고 HEAD가 `$REVIEW_HEAD`인지 확인한다.
 
 각 결과 변수 저장 → 로그 append.
 
@@ -402,6 +330,8 @@ Claude 본인도 같은 자료로 분석:
 
 PR: #${PR_NUM} <title>
 공유 자료: ${SHARED_LABEL}
+${SHARED_INSTR}
+응답에 reviewed_commit과 근거 파일의 review_root 기준 경로를 포함한다.
 
 ═══ 페르소나 (${PERSONA_NAME}) ═══
 <역할 매핑>
@@ -480,62 +410,35 @@ done
 
 `$LOG_TMP`에 append.
 
-## 9단계: 브랜치 복귀 (deep 필수, 명시 호출)
+## 9단계: 결과 보존과 안전한 정리
 
-`--deep`이면 *반드시* `restore_branch`를 명시적으로 호출한다. trap에 기대지 말 것
-(슬래시 커맨드는 여러 bash 호출로 쪼개질 수 있어 trap이 발동 안 될 수 있음):
+모든 peer의 응답과 최종 요약을 `$LOG_TMP`에 포함한다. 깊은 모드는 해당 SHA를 검토했다는 `reviewed_commit`을 확인한다. 아직 응답 중인 peer가 있거나 종료 여부를 확인할 수 없으면 finish/cleanup을 실행하지 않고 run을 남긴다.
+
+모든 peer와 작업 명령이 worktree 사용을 끝낸 것을 확인한 경우에만:
 
 ```bash
 if [ "$MODE" = "deep" ]; then
-  restore_branch
+  ~/.claude/scripts/crosstalk review finish "$REVIEW_RUN_ID" \
+    --outcome completed --result-stdin --confirm-stopped < "$LOG_TMP" || exit 1
+  ~/.claude/scripts/crosstalk review cleanup "$REVIEW_RUN_ID"
 fi
 ```
 
-`restore_branch` 함수가 자동 복구 실패 시 수동 복구 명령을 stdout에 출력한다.
-사용자에게 그 안내를 그대로 보여주고, 복구 확인 후 다음 단계로.
+중단된 리뷰도 종료를 확인한 뒤 실패 이유와 기존 응답을 보존해 `--outcome failed`로 finish한다. cleanup은 변경 파일·새 commit·ignored 파일·소유권 불일치가 있으면 worktree를 남긴다. 실패했다고 강제 삭제하지 않는다. `artifact_path`의 결과와 고정 diff는 cleanup 이후에도 보존된다.
 
-## 10단계: 로그 + 자료 보관 질문
+## 10단계: 결과 안내
 
-`AskUserQuestion`:
-```
-header: 리뷰 자료
-question: PR #${PR_NUM} 리뷰 자료를 보관할까요?
-options:
-  - 보관 (~/Documents/crosstalk/PR-${PR_NUM}-<날짜>/)
-  - 폐기
-```
+review run ID, 검토한 SHA, 보존된 artifact 경로, cleanup 결과를 사용자에게 보여준다. 추가 보관을 요청하면 결과를 복사하되 유일한 원본 자료를 지우지 않는다. 빠른 모드의 기존 로그와 transport 응답도 결과 안내 전까지 보존한다. 파일 삭제는 별도의 명시적인 사용자 요청으로만 수행한다.
 
-**보관** — discussion.md + diff + responses/ 모두:
-```bash
-mkdir -p ~/Documents/crosstalk
-DATE=$(date '+%Y-%m-%d')
-DEST_DIR=~/Documents/crosstalk/PR-${PR_NUM}-${DATE}
-mkdir -p "$DEST_DIR"
-mv "$LOG_TMP" "$DEST_DIR/discussion.md"
-mv "$DIFF_PATH" "$DEST_DIR/pr.diff"
-if [ -d "$RUN_DIR" ]; then
-  cp -R "$RUN_DIR/responses" "$DEST_DIR/responses"
-  cp "$RUN_DIR/manifest.json" "$DEST_DIR/manifest.json" 2>/dev/null || true
-  rm -rf "$RUN_DIR"
-fi
-```
+## 중단 후 재개
 
-**폐기** — LOG_TMP + DIFF + RUN_DIR 모두:
-```bash
-rm -f "$LOG_TMP" "$DIFF_PATH"
-[ -d "$RUN_DIR" ] && rm -rf "$RUN_DIR"
-```
+callback에서는 manifest의 `review_run_id`, `review_root`, `reviewed_commit`, `diff_path`를 복원한다. 깊은 모드였으면 `crosstalk review status <review_run_id>`를 조회하고 고정 SHA와 소유권 진단을 확인한다. 작업이 멈췄다는 이유로 원본 브랜치를 바꾸거나 stash를 복원하지 않는다.
 
-## Ctrl+C 대응
-
-`trap restore_branch EXIT INT TERM`은 *현재 bash 호출* 안에서만 유효하다.
-같은 호출에서 Ctrl+C가 발생하면 trap이 발동해 복귀를 시도한다 — *보조 안전망*일 뿐 1차 보장은 아니다.
-어떤 경로로 끝나든 사용자에게 "원래 브랜치 복귀 처리 완료" 또는 "수동 복구 명령" 둘 중 하나를 명시적으로 보여줄 것.
-이후 8~10단계 점프.
+worktree 생성 직후 종료된 `preparing` run도 status에서 Git 등록 정보를 대조할 수 있다. 단순히 경로가 존재한다는 이유만으로 준비 완료로 취급하지 않는다. 검증된 checkout과 고정 자료를 확인한 뒤 계속 읽거나, 모든 작업이 멈춘 것을 확인하고 실패 결과를 보존한다.
 
 ## 주의사항
 
-- 빠른 모드는 hunk 위주 — caller/다른 파일 영향 못 잡음.
-- 깊은 모드(⚠️ experimental)는 현재 디렉토리를 일시 전환. **9단계의 명시 `restore_branch` 호출이 1차 보장**, `trap restore_branch EXIT INT TERM`은 같은 bash 호출 내 강제 종료 대비 보조 안전망. 사전 동의 필수.
-- 모든 cmux pane이 같은 디렉토리에서 시작됐어야 깊은 모드 가능.
-- bridge 호출 실패 즉시 사용자에게 보고 + (deep이면 복귀 후) 종료.
+- 빠른 모드는 hunk 중심이며 전체 caller 분석을 대신하지 않는다.
+- 깊은 모드의 모든 분석 도구는 절대 review_root를 명시한다. peer의 전역 cwd 변경을 가정하지 않는다.
+- review prepare는 저장소 테스트나 스크립트를 실행하지 않는다. 명시적인 추가 실행 요청은 별도로 판단한다.
+- bridge 오류가 발생하면 해당 오류와 run ID를 보고하고 자료를 보존한다.

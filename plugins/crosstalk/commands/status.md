@@ -8,10 +8,15 @@ argument-hint: (인자 없음)
 
 읽기 전용. 현재 Crosstalk 셋업을 한눈에 보여준다.
 
+## Protocol 2 진단
+
+먼저 `~/.claude/scripts/crosstalk capabilities --json`과 `doctor --offline`을 실행한다. DB가 없거나 migration이 필요하면 그대로 진단하며 생성·변환하지 않는다. Ghostty에서는 `status`로 메시지 상태와 effective recovery_required, 별도 알림 상태를 확인한다. pagination으로 나머지 항목도 확인한 뒤 미처리 항목이 없다고 판단한다. runtime/protocol/schema, 설치 불완전, unresolved session을 표시한다. 기본 조회는 launch/bind/receive/ack/retry/recover나 프리셋 복사를 하지 않는다.
+
 ## 1단계: 정보 수집
 
 ```bash
-CONFIG=~/.claude/crosstalk/config.json
+CONFIG_ROOT="${CROSSTALK_CONFIG_DIR:-$HOME/.claude/crosstalk}"
+CONFIG="$CONFIG_ROOT/config.json"
 
 if [ ! -f "$CONFIG" ]; then
   echo "❌ Crosstalk is not installed. Run /crosstalk:install first."
@@ -21,11 +26,10 @@ fi
 LANGUAGE=$(jq -r '.language // "en"' "$CONFIG" 2>/dev/null || echo "en")
 case "$LANGUAGE" in en|ko) ;; *) LANGUAGE="en" ;; esac
 
-# 자가치유 — 디렉토리 비어있으면 마켓 캐시에서 자동 보충
-~/.claude/scripts/crosstalk_bridge.sh ensure-presets "$LANGUAGE" >/dev/null 2>&1 || true
+# 조회는 프리셋을 생성하거나 변경하지 않는다.
 
-RULES_DIR=~/.claude/crosstalk/rules/${LANGUAGE}
-PERSONAS_DIR=~/.claude/crosstalk/personas/${LANGUAGE}
+RULES_DIR="$CONFIG_ROOT/rules/$LANGUAGE"
+PERSONAS_DIR="$CONFIG_ROOT/personas/$LANGUAGE"
 ACTIVE_RULES=$(jq -r '.active_rules // "default"' "$CONFIG")
 ACTIVE_PERSONA=$(jq -r '.active_persona // "default"' "$CONFIG")
 

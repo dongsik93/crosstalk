@@ -8,9 +8,7 @@ argument-hint: [--language en|ko] [--surface ghostty:<UUID>]
 
 먼저 `~/.claude/scripts/crosstalk_bridge.sh backend`로 실제 백엔드를 확인한다. 환경변수 누락이나 self 실패를 cmux 실행 필요로 해석하지 않는다.
 
-Ghostty에서 `--surface ghostty:<UUID>`를 지정하면 현재 CLI의 도구 셸에서 `~/.claude/scripts/crosstalk_bridge.sh bind ghostty:<UUID>`를 실행한다. 이 연결은 현재 CLI 프로세스가 살아 있는 동안 유지된다. 명령을 다른 CLI에서 대신 실행하지 않는다.
-
-Ghostty의 `self`는 Claude/agy 호출자의 pane을 TTY 탐침(OSC 7)으로 직접 찾으므로 보통 묻지 않는다. 그래도 `self`가 같은 디렉터리의 여러 후보를 반환하면(주로 Codex 호출자) ID와 제목을 보여주고 사용자가 현재 CLI에 해당하는 후보를 고르게 한다. 선택한 ID로 `bind`한 뒤 `list-all`과 라벨링을 계속한다. 포커스나 첫 후보를 임의로 고르지 않는다. 이 경우 cmux 실행이나 CLI 재시작을 요구하지 않는다.
+Ghostty의 논리 세션은 protocol 2 handshake로 연결한다. `bridge bind`와 라벨은 물리 주소 탐색 자료이며 세션 소유권이 아니다. 아래 Ghostty 절차를 사용하고 cmux 전용 화면 조회로 넘어가지 않는다. 포커스·제목·CLI 종류·cwd로 대상 pane을 추측하지 않는다.
 
 두 가지 용도:
 
@@ -36,12 +34,13 @@ if [ -z "$LANG_REQUESTED" ]; then
   esac
 fi
 
-CONFIG=~/.claude/crosstalk/config.json
+CONFIG_ROOT="${CROSSTALK_CONFIG_DIR:-$HOME/.claude/crosstalk}"
+CONFIG="$CONFIG_ROOT/config.json"
 CURRENT_LANG=$(jq -r '.language // "en"' "$CONFIG" 2>/dev/null || echo "en")
 
 # 언어 변경 요청이 있으면 config 업데이트
 if [ -n "$LANG_REQUESTED" ] && [ "$LANG_REQUESTED" != "$CURRENT_LANG" ]; then
-  mkdir -p ~/.claude/crosstalk
+  mkdir -p "$CONFIG_ROOT"
   if [ -f "$CONFIG" ]; then
     jq --arg lang "$LANG_REQUESTED" '.language = $lang' "$CONFIG" > "$CONFIG.tmp" && mv "$CONFIG.tmp" "$CONFIG"
   else
@@ -72,15 +71,33 @@ case "$LANGUAGE" in en|ko) ;; *) LANGUAGE="en" ;; esac
 
 해결: cmux 탭 이름에 `ct-<kind>` 라벨을 박고, detect는 라벨 우선 → 폴백으로 푸터 매칭.
 
-## Ghostty
+## Ghostty — protocol 2 handshake
 
-Use `bridge list-all` and `bridge label` with `ghostty:<UUID>` IDs. Labels are stored separately and do not replace terminal titles. Ghostty has no screen preview API: for an unknown pane show its ID and ask for Claude, Codex, Antigravity, shell, or skip. Do not call capture/read-screen. For an existing agy pane, have that CLI read ~/.claude/crosstalk/mailbox.md once to register the summary-notification workflow; do not inject a legacy RUN_ID trigger. Newly launched peers are labelled automatically by `bridge ensure-peer`.
+1. `~/.claude/scripts/crosstalk capabilities --json`과 `doctor --offline`을 확인한다. protocol 2와 정상 설치를 요구하고 capabilities의 `mailbox_instructions` 경로를 읽는다. 미이관 DB는 자동 변환하지 않고 업그레이드 절차를 안내한다.
+2. `bridge strict-self`로 현재 pane을 확인한다. Claude/agy는 실제 TTY probe를 사용할 수 있다. Codex의 세션 ID만으로 pane 주소가 입증되지는 않는다. 확인 불가 시 Ghostty의 ID/제목/cwd 후보를 표시하고 사용자가 현재 CLI를 선택하게 한다. `--surface`를 이미 지정했다면 그 선택을 사용한다.
+3. 선택한 CLI **자신의 도구 셸에서** 정확한 현재 `CROSSTALK_SURFACE_ID`와 공유 `CROSSTALK_CONFIG_DIR`를 명시한다. Codex는 매 tool 호출마다 이 환경을 다시 전달해야 하며 CODEX_THREAD_ID/bridge cache만으로 strict 식별이 되지 않는다. `bridge bind <EXACT_SURFACE>`는 레거시 transport cache일 뿐이다. 이어 신규 논리 참가자를 연결한다. 이미 검증된 현재 binding이 있으면 `session status`로 확인해 재사용하며 매번 새 challenge를 만들지 않는다.
 
-**One setup covers every pane.** Run setup from any one pane and label every pane in that tab (including the caller itself as claude/codex/antigravity). Other CLIs in the same directory then bind themselves on their first `self` call by matching their own CLI kind against those labels — do not ask the user to run setup or `bind` again in the other pane. Codex identifies itself by `CODEX_THREAD_ID` (its tool commands run in a daemon owned by the first codex, so the process tree is unreliable); `launch` binds that session to its pane at startup. Only two same-kind CLIs in one directory still need an explicit `bind`.
+```bash
+CT="$HOME/.claude/scripts/crosstalk"
+BRIDGE="$HOME/.claude/scripts/crosstalk_bridge.sh"
+# SELF is the current execution's exact selected/probed address, never a previous thread cache.
+# Repeat in every Codex tool invocation; CONFIG_ROOT is the shared state directory.
+export CROSSTALK_CONFIG_DIR="$CONFIG_ROOT" CROSSTALK_SURFACE_ID="$SELF"
+# KIND is this actual CLI kind.
+"$BRIDGE" bind "$SELF"
+CHALLENGE=$("$CT" session challenge --surface "$SELF" --kind "$KIND") || exit 1
+NONCE=$(printf '%s' "$CHALLENGE" | jq -er '.challenge') || exit 1
+"$CT" session bind --challenge "$NONCE" --kind "$KIND" --protocol 2
+```
 
-**Handshake (Ghostty).** After labelling, bind every peer exactly: for each pane labelled claude, codex or antigravity other than self, run
-`~/.claude/scripts/crosstalk_bridge.sh send <ID> "Crosstalk setup: run exactly ~/.claude/scripts/crosstalk_bridge.sh bind <ID> and reply only: bound"`
-with that pane's own `<ID>`. The sender typed into that pane, so the ID is certain; this also covers same-kind panes and a resumed Codex session whose old pane is still open. It costs the peer one short turn; a busy peer handles it after its current turn. Do not send it to shell panes.
+4. `bridge list-all`로 peer 후보를 보고 사용자가 선택했거나 직접 생성한 정확한 pane만 연결한다. Ghostty는 화면 캡처를 지원하지 않으므로 unknown 종류를 화면 텍스트로 추정하지 않는다. 라벨을 붙여도 아직 ready가 아니다. 각 peer에 `session challenge --surface <EXACT_SURFACE> --kind <KIND> --notify`로 challenge를 전달한다. peer가 자신의 실행 문맥에서 정확한 transport bind와 protocol-2 bind를 수행해야 한다. 같은 `CROSSTALK_CONFIG_DIR`를 전달하고 capabilities의 지시문을 읽게 한다. 다른 CLI가 대신 bind하지 않는다. shell pane에는 보내지 않는다.
+5. `session status`에서 두 참가자의 실제 protocol-2 binding을 확인한 뒤만 준비 완료로 표시한다. 알림 제출 성공은 handshake 완료가 아니다. busy/login/approval 상태면 기존 pane을 남기고 완료를 기다린다. 새로운 topic을 먼저 보내거나 중복 pane을 열지 않는다.
+
+Codex를 restart/resume하면 이전 대화에 기억된 pane ID나 상속된 과거 surface 값을 재사용하지 않는다. 현재 target을 다시 선택하고 handshake한 뒤 매 명령에 정확한 주소를 명시한다.
+
+재시작·주소 변경은 신규 참가자 생성과 구분한다. `session status`/history로 기존 논리 세션을 확인하고 사용자에게 실제 인계를 승인받는다. 기존 pane이 살아 있거나 repository 문맥이 바뀌었으면 특히 자동 이전하지 않는다. `session challenge --surface <NEW_SURFACE> --kind <KIND> --session-id <LOGICAL_ID> --expected-generation <CURRENT_GENERATION>`으로 새 challenge를 만들고, 선택된 새 CLI에서 `session rebind --challenge <NONCE> --kind <KIND> --protocol 2 --confirm-transfer`를 실행한다. 이전 lease는 stale이므로 이후 사용자 승인된 recover가 필요하다. nonce/token은 일반 출력이나 로그에 남기지 않는다.
+
+이 절차는 동일 OS 사용자의 정상 CLI 간 오배송을 막는 연결 규약이며 악성 동일 사용자 프로세스를 막는 보안 인증은 아니다. label/cwd 캐시는 기존 대화 소유권을 넘기는 근거가 아니다.
 
 ## 동작
 

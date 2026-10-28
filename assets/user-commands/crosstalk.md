@@ -1,41 +1,30 @@
 ---
-description: Run Crosstalk analysis from Claude, automatically preparing a Codex peer in Ghostty, or show readiness without a topic.
+description: Run Crosstalk through verified Ghostty protocol-2 sessions, or retain cmux legacy workflows.
 allowed-tools: Bash, Read, AskUserQuestion
 argument-hint: <분석 주제>
 ---
 
 # /crosstalk
 
-Incoming `[Crosstalk] 질문:/답변:/Question:/Reply:` previews: read `~/.claude/crosstalk/mailbox.md` and call ID-less `receive`. Do not answer the preview directly or infer an ID from it. Process the actual DB row, then check for the next pending message.
-
-For an incoming `[crosstalk] mailbox <ID>` notification, read `~/.claude/crosstalk/mailbox.md` and handle it without starting a new run.
-
 Use the full `$ARGUMENTS` as the raw topic. Preserve its wording.
 
 ```bash
+CT="$HOME/.claude/scripts/crosstalk"
 BRIDGE="$HOME/.claude/scripts/crosstalk_bridge.sh"
+"$CT" capabilities --json
 BACKEND=$("$BRIDGE" backend)
-SELF=$("$BRIDGE" self)
-"$BRIDGE" label "$SELF" claude
-"$BRIDGE" list-peers
 ```
 
-If the bridge is missing, run `/crosstalk:install`. If `self` fails, preserve a supplied topic with `pending-save` and report that error. Do not guess the focused pane or move the user to cmux when Ghostty is available.
+On Ghostty require protocol 2, supported schema and healthy installation. Read the exact `mailbox_instructions` path returned by capabilities. If runtime or instructions are old/partial, show the upgrade/reload action. Do not automatically migrate the DB or fall back to tokenless v0.10 commands.
 
-With no topic: show backend, caller, peers, and one next action. Do not launch peers merely to display status.
+Incoming `[Crosstalk] 질문:/답변:/Question:/Reply:` previews are wake-up hints. Follow the installed mailbox instructions: receive one queued message, process its full body with its lease, then reply or ack/atomic follow-up. Do not answer previews, infer IDs, create a new run, or use legacy ping. For old `[crosstalk] mailbox <ID>` wake-ups, receive that ID without replay. Explicit legacy `RUN_ID` triggers instead keep their task-file/response/ping workflow.
 
-Before creating a new Ghostty peer, read the new-peer permission choice in `~/.claude/crosstalk/mailbox.md` and ask whether to retain CLI defaults or explicitly auto-approve this launch. Reusing an existing peer does not ask again or change permissions.
+No topic: show capabilities, `doctor --offline`, and read-only status. Do not launch peers, label, bind, claim, or repair just to display readiness.
 
-With a topic on Ghostty, use Codex by default. If the user explicitly requests agy/Antigravity, set PEER_KIND=antigravity and use that same target for sending:
+With a Ghostty topic, follow `/crosstalk:setup` to verify caller and peer bindings. Use `bridge strict-self` for exact caller identity; if it cannot identify this pane, retain the topic with `pending-save`, show candidates, and let the user select the intended pane. A label/cwd/focus is not identity proof. `--surface` explicitly selected by the user can be bound in that CLI's own context. Do not run another CLI's bind on its behalf. For a Codex participant, every protocol-2 tool invocation must explicitly supply its current target `CROSSTALK_SURFACE_ID` and shared `CROSSTALK_CONFIG_DIR`; a thread cache or previous bridge bind alone is not proof. After resume/restart reselect its exact target and handshake, never reuse the former pane ID from conversation memory.
 
-```bash
-PEER=$("$BRIDGE" ensure-peer claude "${PEER_KIND:-codex}")
-```
+Use Codex by default, or Antigravity only when requested. `bridge ensure-peer claude <peer-kind>` may reuse an existing candidate or open a native split. A new launch must finish protocol-2 handshake; an existing label alone is insufficient. Inspect `session status` before sending. Use CLI default permissions unless the user explicitly selected auto-approval for this launch. Preserve pending panes on timeout; do not create duplicates, restart peers, or increase permissions.
 
-This reuses a labelled Codex in the same tab or splits right and starts Codex in the current directory. On startup timeout, let the user finish login/trust prompts in that existing pane; do not launch a duplicate or bypass permissions.
+Then follow the mailbox instructions to send the unchanged topic. A saved request remains saved even if notification is unknown: use its status/history and retry the same ID, never a replacement request. Ask has no automatic callback/discussion. `resume` resumes a topic retained after preparation failed; stored message recovery uses `recover` with explicit authorization.
 
-On Ghostty, read `~/.claude/crosstalk/mailbox.md` and use its send/receive/reply flow with the unchanged topic. Do not execute the legacy file/ping analysis flow for a new Ghostty discussion. On cmux, run `/crosstalk:launch` if peers are missing and then continue `/crosstalk:analyze`.
-
-For an incoming Crosstalk peer message, read the task file named in the message and follow its response/ping instructions instead of starting another run. For a completion callback, restore that run's manifest and continue its existing analysis rounds; do not launch a new run.
-
-Ghostty's first binding finds a Claude/agy caller's pane exactly with an invisible TTY probe (OSC 7). If `self` still reports candidates, run `/crosstalk:setup --surface ghostty:<UUID>` once from this CLI after selecting its candidate ID; never select an arbitrary same-directory terminal. List IDs with `osascript -e 'tell application "Ghostty" to get {id, name, working directory} of every terminal'`.
+On cmux retain `/crosstalk:launch` and `/crosstalk:analyze` legacy flows. A Ghostty identity error does not justify switching to cmux.

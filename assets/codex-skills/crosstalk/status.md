@@ -1,29 +1,15 @@
 # $crosstalk status
 
-Show Crosstalk setup status without starting a run.
-
-Collect:
-
-- `~/.claude/crosstalk/config.json`
-- active language/rules/persona
-- available rules/personas for that language
-- Ghostty or cmux panes, when the caller can be identified
-- whether `~/.claude/scripts/crosstalk_bridge.sh` exists
-- whether `~/.codex/skills/crosstalk/SKILL.md` exists
-
-Use:
+Read-only inspection; do not launch, label, bind, receive, retry, reclaim, create a DB, or copy presets.
 
 ```bash
-~/.claude/scripts/crosstalk_bridge.sh list-all
+~/.claude/scripts/crosstalk capabilities --json
+~/.claude/scripts/crosstalk doctor --offline
+~/.claude/scripts/crosstalk status
 ```
 
-when the caller terminal can be identified.
+If the terminal can be identified, `crosstalk_bridge.sh list-all` may list candidates. A label is not a protocol-2 binding. Show runtime/protocol/schema, installation health, unresolved sessions, queued/processing/completed and effective recovery_required states, and separate delivery status. Missing DB is a diagnosis, not a request to create it. Use pagination before claiming there are no other pending or interrupted messages.
 
-On Ghostty, also run `~/.claude/scripts/crosstalk status` to show pending/received/replied messages without consuming them.
+Read config, rules/personas and their names under `CROSSTALK_CONFIG_DIR` (default `~/.claude/crosstalk`) without changing them. Show one concrete next action for each blocking diagnosis. Status never authorizes recover or an automatic permission change.
 
-Output a compact status block and include both start commands:
-
-```text
-Claude caller: /crosstalk <topic>
-Codex caller:  $crosstalk <topic>
-```
+Start commands: Claude `/crosstalk <topic>`; Codex `$crosstalk <topic>`.
