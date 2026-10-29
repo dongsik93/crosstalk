@@ -3,7 +3,7 @@
 English | [한국어](README.ko.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.12.0--dev-blue)
+![Version](https://img.shields.io/badge/version-0.12.1--dev-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-black)
 
@@ -11,11 +11,11 @@ Discuss a topic with Claude and Codex side by side in Ghostty, or invite Antigra
 
 ![Crosstalk hero](docs/hero.png)
 
-> v0.12.0 is under verification. Protocol 3/schema 3 add discussion engine 1 as an explicit opt-in; existing mailbox-v2 threads keep their meaning. Use the [upgrade guide](docs/upgrade-v0.12.md) and [verification record](docs/verification-v0.12.md). Neither old live checks nor configured CI certify the new engine.
+> v0.12.1 adds captured-input independent review for a Claude caller and fresh Codex peer. Natural independent-review requests select that route without an engine option. General engine discussions remain opt-in; existing mailbox-v2 threads keep their meaning. Read the [independent-review boundary](docs/independent-review.md), [upgrade guide](docs/upgrade-v0.12.md) and [v0.12 verification record](docs/verification-v0.12.md). Full release/live verification is not implied.
 
 ## Overview
 
-Crosstalk connects existing interactive AI CLIs. Start from Codex with `$crosstalk <topic>` or Claude Code with `/crosstalk <topic>`. Each participant analyzes independently, and the caller compares the answers — consensus or respectful disagreement, without forcing agreement.
+Crosstalk connects existing interactive AI CLIs. Start from Codex with `$crosstalk <topic>` or Claude Code with `/crosstalk <topic>`. The caller compares the participants’ answers without forcing agreement. For protected first-input handling, use the independent-review request described below; ordinary mailbox conversations do not acquire that guarantee retroactively.
 
 **Ghostty is the main getting-started path for Claude ↔ Codex discussion.** The existing cmux backend remains available for advanced workflows. Support differs by backend:
 
@@ -23,6 +23,7 @@ Crosstalk connects existing interactive AI CLIs. Start from Codex with `$crossta
 | --- | --- | --- |
 | Claude ↔ Codex ordinary mailbox | mailbox-v2 compatibility retained | Legacy supported; Codex caller experimental |
 | Discussion engine 1 (`--engine`) | One caller/one peer, explicit opt-in; v0.12 live checks pending | Unsupported; keep RUN_ID workflows |
+| Natural independent review | Claude caller → fresh Codex peer; captured user statements, no `--engine` needed | Unsupported |
 | Quick opinions (`ask`) | Supported | Supported |
 | Prepare peer panes | Native split or reuse in the same tab | Workspace splits through `:launch` |
 | Antigravity (`agy`) peer | Ordinary compatibility; engine peer readiness requires protocol 3/engine 1 and live verification | Legacy supported |
@@ -31,7 +32,17 @@ Crosstalk connects existing interactive AI CLIs. Start from Codex with `$crossta
 
 See the [Ghostty verification record](docs/ghostty-verification.md) for the actual checks and their limits. This checkout includes the Ghostty integration. Update older marketplace installations before following the quick start.
 
-## Opt-in discussion engine (v0.12)
+## Independent review from normal conversation (v0.12.1)
+
+Keep discussing the task with Claude, then say:
+
+> Review this independently with Codex.
+
+Crosstalk uses the recorded user question and subsequent user constraints, not a first message rewritten by Claude. When the subject is clear, it proceeds; only missing scope or unverified provenance needs one focused clarification. Claude keeps its context, and a new Codex conversation is launched beside the existing pane for the captured input. Existing Codex panes are not cleared or closed. Both first answers are stored before they are exchanged; subsequent rounds can discuss and revise positions normally.
+
+This route requires the updated Claude plugin capture hook and runtime. Reload the plugin/session after installation. The first independent task cannot override its body, rules or persona. A request to critique Claude’s proposal instead uses the explicitly labeled proposal-review mode; an existing-context opinion is not presented as independent review. Project instructions and shared files are still visible, so a new conversation is not a promise of a completely blank or unbiased model. See [details and limits](docs/independent-review.md).
+
+## General opt-in discussion engine (v0.12)
 
 The engine stores the current run, round, action, fixed input and termination reason. AI performs analysis/comparison; code owns progression and atomic state changes. Start explicitly while live release gates are pending:
 
@@ -44,7 +55,7 @@ $crosstalk analyze --engine <topic>
 $crosstalk ask --engine <question>
 ```
 
-Both participants need verified protocol-3/engine-1 readiness. `capabilities --json` returns `discussion_instructions`; its [canonical workflow](assets/codex-skills/crosstalk/discussion.md) uses `run start`, `next`, `take`, `submit`, `decide`, `status`, `report` and explicit recovery controls. `run start` itself is the low-level opt-in; `engine_default=false` keeps normal new requests on ordinary mailbox behavior. Existing threads/runs never change execution owner silently.
+Both participants need verified protocol-3/engine-1 readiness. `capabilities --json` returns `discussion_instructions`; its [canonical workflow](assets/codex-skills/crosstalk/discussion.md) uses `run start`, `next`, `take`, `submit`, `decide`, `status`, `report` and explicit recovery controls. `run start` itself is the low-level opt-in; `engine_default=false` keeps other new requests on ordinary mailbox behavior; natural independent-review intent has its own protected route. Existing threads/runs never change execution owner silently.
 
 The caller must save its first analysis before Crosstalk APIs expose the peer's first answer. This is disclosure order, not isolation from a neighboring pane or proof against shared-context bias. Later decisions cite the fixed current results; a peer's agreement alone does not prove consensus. Final results distinguish the caller's conclusion, retained disagreement, insufficient information and round-limit termination.
 
@@ -57,7 +68,7 @@ No daemon, direct model API, model/effort override, agy caller, mixed-terminal r
 - **Visible discussion**: watch Claude and Codex work in neighboring Ghostty panes, starting from either CLI.
 - **Reuse existing CLI accounts**: Crosstalk does not introduce a separate model API integration.
 - **Automatic peer preparation**: launch the other CLI in the current directory when no labelled peer exists in the tab; wait for its startup acknowledgement before sending a task.
-- **Independent answers**: each participant receives the user's original topic.
+- **Protected independent first input**: in the Claude-capture workflow, the peer receives recorded user statements and neutral instructions rather than the caller’s rewritten conclusion.
 - **Durable mailbox**: Ghostty requests and replies are stored in SQLite. `send`, `receive`, and `reply` handle IDs, receipt state, and reply notifications; AIs no longer manage per-message MD files or ping commands.
 - **Explicit results**: ordinary replies retain verdict/confidence fields; opt-in engine actions add fixed input references and structured comparison decisions. Legacy cmux markers remain safely parsed as JSON.
 - **Quick opinions**: `ask` lets each AI answer in its own pane without callbacks or aggregation.

@@ -7,15 +7,16 @@ description: Run or resume Crosstalk discussions with verified Ghostty sessions;
 
 Use this skill when the user invokes `$crosstalk` or asks Codex to act as a Crosstalk caller. Read `readiness.md` for exact current-pane context and runtime health. Every Codex tool invocation supplies the verified current `CROSSTALK_SURFACE_ID` and shared `CROSSTALK_CONFIG_DIR`; a thread cache is not proof after resume.
 
-Run the installed runtime's `capabilities --json` before routing. v0.12 advertises protocol 3/schema 3 and discussion engine 1. Read the instruction path returned by capabilities rather than guessing a config-directory path. Reload stale instructions; never auto-migrate or weaken a missing capability/lease check.
+Run the installed runtime's `capabilities --json` before routing. v0.12.1 advertises protocol 3/schema 3 and discussion engine 1. Read the instruction path returned by capabilities rather than guessing a config-directory path. Reload stale instructions; never auto-migrate or weaken a missing capability/lease check.
 
 ## Route by stored owner, not by preview text
 
 - A `[Crosstalk]` notification is a wake-up, not a new user topic. Call `receive` without an ID. If it returns `handler=discussion`, read `discussion_instructions` (canonical `discussion.md`) and use the returned action with `run take/submit/decide`. Never create a new run from a notification or call raw reply/ack/send on managed work.
 - An ordinary `mailbox-v2` envelope follows `mailbox_instructions` (`mailbox.md`). Existing old ID-bearing `[crosstalk] mailbox <ID>` notifications may receive that ID, but dispatch still selects the stored owner. No `--replay` reclamation.
 - An explicit legacy `RUN_ID` trigger keeps the matching file/ping workflow below. Do not interpret engine run/action IDs as RUN_IDs.
+- Natural independent-review requests in the supported Claude-caller flow use `independent_instructions` automatically, without requiring the user to know `--engine`. As the Codex peer, execute the returned managed action without fetching Claude’s private conversation or beginning another run. A Codex-caller request cannot silently claim this Claude-capture protection; explain the supported entry if requested.
 - New Ghostty `analyze --engine` or `ask --engine`: explicit engine opt-in; read `discussion_instructions` and start exactly one caller/peer run. The caller is Codex, default peer Claude; agy is peer-only and selected only when requested.
-- New Ghostty requests without explicit engine opt-in retain the ordinary mailbox workflow while v0.12 live gates are pending. Do not switch existing work between owners, even if defaults later change.
+- Other new Ghostty requests without an independence request or explicit engine opt-in retain the ordinary mailbox workflow while v0.12 live gates are pending. Do not switch existing work between owners, even if defaults later change.
 - New cmux requests: use the legacy analyze/ask files. Engine support is not implied on cmux and failure never silently falls back to another transport.
 - Empty invocation or `status`: read `status.md`; inspect only, without launching, binding, claiming or repairing.
 - `launch`: read `readiness.md`; reuse a verified candidate/pending pane or create an authorized native split beside the existing pane.

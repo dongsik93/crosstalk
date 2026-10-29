@@ -29,6 +29,8 @@ class RuntimeRepairTests(unittest.TestCase):
         self.source.mkdir()
         # A stable, genuine source release makes retries independent of concurrent repo edits.
         shutil.copytree(REPO / 'assets', self.source / 'assets', ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+        shutil.copytree(REPO / 'plugins/crosstalk/hooks', self.source / 'plugins/crosstalk/hooks',
+                        ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
         shutil.copyfile(REPO / 'VERSION', self.source / 'VERSION')
         patch = mock.patch.dict(os.environ, {'HOME': str(self.home), 'CROSSTALK_CONFIG_DIR': str(self.root)})
         patch.start()

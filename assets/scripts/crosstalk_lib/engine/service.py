@@ -163,6 +163,23 @@ def _advance_tx(conn, run_id, *, allow_discovery=False):
                 return []
             raise
         snapshot=json.loads(run['config_snapshot'])
+        if snapshot.get('review_mode') == 'independent':
+            from ..adapters.registry import fresh_receipt
+            receipt = fresh_receipt(db.root(), peer['surface_id'], snapshot['input_id'])
+            evidence = json.loads(peer['evidence'])
+            require(peer['kind']=='codex' and peer['generation']==1 and peer['cli_session_id']
+                    and receipt.get('process_id')==evidence.get('process_id')
+                    and receipt.get('process_start')==evidence.get('process_start'),
+                    'FRESH_CONTEXT_REQUIRED','Independent analysis requires the newly launched Codex conversation')
+            require(not conn.execute('SELECT 1 FROM sessions WHERE kind=? AND cli_session_id=? AND session_id<>? LIMIT 1',
+                                     ('codex',peer['cli_session_id'],peer['session_id'])).fetchone(),
+                    'FRESH_CONTEXT_REQUIRED','This Codex conversation ID is already known; a new pane is not a new conversation')
+            require(not conn.execute('SELECT 1 FROM messages WHERE sender_session_id=? OR recipient_session_id=? LIMIT 1',
+                                     (peer['session_id'],peer['session_id'])).fetchone(),
+                    'FRESH_CONTEXT_REQUIRED','This peer already participated in Crosstalk; create a new conversation')
+            snapshot['peer_context']={'origin':'new_cli_for_input','launch_id':receipt['launch_id'],
+                                      'cli_session_id':peer['cli_session_id']}
+            conn.execute('UPDATE discussion_runs SET config_snapshot=? WHERE run_id=?',(_json(snapshot),run_id))
         initial_manifest=context.render('local_initial',snapshot,1)
         initial=_create_action(conn,run,'local_initial',caller,1,initial_manifest)
         peer_manifest=context.render('peer_analysis',snapshot,1)
@@ -310,36 +327,76 @@ def start(conn, actor, args, body):
     if args.peer_session: valid_id(args.peer_session)
     require(not peer_surface or peer_surface!=actor['surface_id'],'CAPABILITY_UNSUPPORTED','Caller cannot be its own peer')
     require(type(args.max_rounds) is int and 1<=args.max_rounds<=10,'INVALID_ARGUMENT','max-rounds must be 1..10')
-    require(body and body.strip(),'INVALID_ARGUMENT','A nonempty topic is required')
-    require(len(body.encode('utf-8'))<=contracts.BODY_LIMIT,'CONTEXT_TOO_LARGE','Topic exceeds the byte limit')
+    input_id=getattr(args,'input_id',None)
+    review_mode=getattr(args,'review_mode',None) or ('independent' if input_id else 'discussion')
+    if review_mode=='independent':
+        require(actor['kind']=='claude' and peer_kind=='codex','CAPABILITY_UNSUPPORTED','Independent intake currently supports a Claude caller and a fresh Codex peer')
+        require(input_id,'INPUT_SOURCE_REQUIRED','Use the captured user-input bundle, not a rewritten first question')
+        require(body is None and not args.stdin and args.rules is None and args.persona is None,
+                'INVALID_ARGUMENT','Independent input cannot accept a body, rules or persona override')
+    else:
+        require(not input_id,'INVALID_ARGUMENT','Captured input IDs are for independent review')
+        require(body and body.strip(),'INVALID_ARGUMENT','A nonempty topic is required')
+        require(len(body.encode('utf-8'))<=contracts.BODY_LIMIT,'CONTEXT_TOO_LARGE','Topic exceeds the byte limit')
     semantic={'topic':body,'mode':args.mode,'peer':peer_kind,'peer_session':args.peer_session,'peer_surface':peer_surface,'max_rounds':args.max_rounds,
               'rules':args.rules,'persona':args.persona,'language':args.language}
+    if input_id or getattr(args,'review_mode',None):
+        semantic.update(input_id=input_id,review_mode=review_mode)
     prior=_operation(conn,actor,'start',args.operation_id,semantic)
     if prior: return _response(conn,actor,prior)
+    from .. import intake
+    require(review_mode=='independent' or not intake.requires_engine(actor),
+            'INPUT_SOURCE_REQUIRED','The current independent-review request must use captured input')
     from ..adapters.registry import terminal
     capabilities=terminal('ghostty').capabilities()
     try:
         capabilities.require('exact_addressing','input_submission')
     except ValueError as exc:
         raise Error('CAPABILITY_UNSUPPORTED','Exact addressing and input submission must be supported') from exc
-    snapshot=context.snapshot(body,args.mode,rules=args.rules,persona=args.persona,language=args.language)
+    if review_mode=='independent':
+        bundle=intake.load_bundle(input_id,actor)
+        body=bundle['raw_topic']
+        snapshot=context.independent_snapshot(bundle,args.mode,args.language)
+    else:
+        snapshot=context.snapshot(body,args.mode,rules=args.rules,persona=args.persona,language=args.language)
+        if review_mode!='discussion':
+            snapshot['review_mode']=review_mode
+            snapshot['templates']['peer_analysis'] = (
+                'Review the supplied proposal as an artifact. Its author positions are part of the proposal; '
+                'this is proposal review, not blind alternatives analysis. Return analysis result schema 1.'
+                if review_mode=='proposal_review' else
+                'Give an additional opinion using the supplied topic and your existing context. '
+                'Do not claim a fresh independent conversation. Return analysis result schema 1.')
     snapshot['terminal_capabilities']={'features':dict(capabilities.features),'observed_at':capabilities.observed_at,'evidence':list(capabilities.evidence)}
     with db.transaction(conn):
         mailbox.current_binding(conn,actor)
         prior=_operation(conn,actor,'start',args.operation_id,semantic)
         if prior: result=prior; notifications=[]
         else:
+            if input_id:
+                existing_inputs=conn.execute('SELECT config_snapshot FROM discussion_runs WHERE caller_session_id=?',
+                                             (actor['session_id'],)).fetchall()
+                require(not any(json.loads(row['config_snapshot']).get('input_id')==input_id for row in existing_inputs),
+                        'RESULT_CONFLICT','This captured input already belongs to a run; reuse its start operation or capture a new user request')
+            if review_mode!='independent':
+                active_inputs=conn.execute("SELECT config_snapshot FROM discussion_runs WHERE caller_session_id=? AND lifecycle IN ('active','paused')",
+                                           (actor['session_id'],)).fetchall()
+                require(not any(json.loads(row['config_snapshot']).get('review_mode')=='independent' for row in active_inputs),
+                        'RUN_MANAGED_BY_ENGINE','Complete the current independent run instead of sending a separate opinion')
             active=conn.execute("SELECT run_id FROM discussion_runs WHERE caller_session_id=? AND mode='analyze' AND lifecycle IN ('active','paused')",(actor['session_id'],)).fetchone()
             require(args.mode!='analyze' or not active,'RUN_ALREADY_ACTIVE','Caller already has an active analyze run: '+(active['run_id'] if active else ''))
             rid=_id()
             conn.execute('''INSERT INTO discussion_runs(run_id,mode,caller_session_id,requested_peer_kind,requested_peer_session,pending_surface_id,lifecycle,phase,max_rounds,
                          engine_version,protocol_version,prompt_bundle_version,execution_driver,raw_topic,config_snapshot,created_at,updated_at)
-                         VALUES(?,?,?,?,?,?,'active','preparing',?,1,3,1,'discussion-v1',?,?,?,?)''',
-                         (rid,args.mode,actor['session_id'],peer_kind,args.peer_session,peer_surface,args.max_rounds,body,_json(snapshot),now(),now()))
+                         VALUES(?,?,?,?,?,?,'active','preparing',?,1,3,?,'discussion-v1',?,?,?,?)''',
+                         (rid,args.mode,actor['session_id'],peer_kind,args.peer_session,peer_surface,args.max_rounds,snapshot['prompt_bundle_version'],body,_json(snapshot),now(),now()))
             _event(conn,'discussion_started',rid,mode=args.mode)
-            notifications=_advance_tx(conn,rid,allow_discovery=True)
+            notifications=_advance_tx(conn,rid,allow_discovery=review_mode!='independent')
             result={'run_id':rid}
             _record(conn,actor,'start',args.operation_id,semantic,result)
+    if input_id:
+        with persisted(result['run_id']):
+            intake.mark_consumed(input_id,actor,result['run_id'])
     return _response(conn,actor,result,notifications)
 
 
@@ -566,6 +623,8 @@ def add_parser(subparsers):
     start_parser.add_argument('--mode',choices=('analyze','ask'),default='analyze')
     start_parser.add_argument('--peer-session')
     start_parser.add_argument('--peer-surface')
+    start_parser.add_argument('--input-id')
+    start_parser.add_argument('--review-mode',choices=('independent','proposal_review','additional_opinion'))
     start_parser.add_argument('--max-rounds',type=int,default=10)
     for field in ('rules','persona','language'): start_parser.add_argument('--'+field)
     for name in ('next','status','report','advance','pause','continue','cancel','export'):

@@ -18,7 +18,7 @@ import uuid
 MANIFEST = 'installation.json'
 SCRIPTS = ('crosstalk', 'crosstalk_bridge.sh', 'crosstalk_ghostty.sh', 'crosstalk_terminal.sh')
 RUNTIME_MODULES = ('__init__', 'cli', 'db', 'delivery', 'doctor', 'installer', 'legacy',
-                   'mailbox', 'migrations', 'protocol', 'reviews', 'sessions',
+                   'mailbox', 'migrations', 'protocol', 'reviews', 'sessions', 'intake',
                    'engine/__init__', 'engine/contracts', 'engine/state', 'engine/store',
                    'engine/context', 'engine/report', 'engine/service',
                    'adapters/__init__', 'adapters/__main__', 'adapters/contracts', 'adapters/registry',
@@ -122,8 +122,10 @@ def _sources(source):
     required = ['VERSION', 'assets/scripts/crosstalk', 'assets/scripts/crosstalk_bridge.sh',
                 'assets/scripts/crosstalk_ghostty.sh', 'assets/scripts/crosstalk_terminal.sh', 'assets/scripts/crosstalk_lib/__init__.py',
                 'assets/scripts/crosstalk_lib/cli.py', 'assets/codex-skills/crosstalk/SKILL.md',
-                'assets/codex-skills/crosstalk/mailbox.md', 'assets/codex-skills/crosstalk/discussion.md', 'assets/user-commands/crosstalk.md',
-                'assets/agy-commands/crosstalk-peer.toml']
+                'assets/codex-skills/crosstalk/mailbox.md', 'assets/codex-skills/crosstalk/discussion.md',
+                'assets/codex-skills/crosstalk/independent.md', 'assets/user-commands/crosstalk.md',
+                'assets/agy-commands/crosstalk-peer.toml',
+                'plugins/crosstalk/hooks/hooks.json', 'plugins/crosstalk/hooks/capture.py']
     required.extend(f'assets/scripts/crosstalk_lib/{name}.py' for name in RUNTIME_MODULES)
     required.extend(f'assets/scripts/crosstalk_lib/engine/templates/{name}' for name in RUNTIME_TEMPLATES)
     for rel in required:
@@ -131,7 +133,7 @@ def _sources(source):
             raise ValueError(f'Incomplete release: {rel}')
     paths = [source / 'VERSION']
     for rel in ('assets/scripts', 'assets/codex-skills/crosstalk', 'assets/user-commands',
-                'assets/agy-commands', 'assets/rules', 'assets/personas', 'plugins/crosstalk/commands'):
+                'assets/agy-commands', 'assets/rules', 'assets/personas', 'plugins/crosstalk/commands', 'plugins/crosstalk/hooks'):
         for path in sorted((source / rel).rglob('*')):
             _safe(path)
             if path.is_file() and '__pycache__' not in path.parts and path.suffix != '.pyc':

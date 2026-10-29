@@ -1,0 +1,351 @@
+"""Verbatim Claude input bundles. Normal API provenance, not an OS-user sandbox."""
+from contextlib import closing
+from datetime import datetime, timezone
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import sys
+import tempfile
+import uuid
+
+from . import db, sessions
+from .protocol import Error, require, valid_id
+
+LIMIT = 1024 * 1024
+_AUTOMATED = ('[crosstalk]', 'crosstalk startup check.', 'crosstalk test.',
+              'crosstalk reverse test.', '<task-notification', '<teammate-message',
+              '<local-command', '<system-reminder')
+
+
+def _canonical(value):
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False)
+
+
+def _hash(value):
+    return hashlib.sha256(value.encode('utf-8')).hexdigest()
+
+
+def _safe(path):
+    path = Path(path).absolute()
+    require(not any(item.is_symlink() for item in (path, *path.parents)),
+            'INPUT_SOURCE_UNVERIFIED', 'Input storage and transcript paths must not traverse symlinks')
+    if path.exists():
+        require(path.stat().st_uid == os.getuid(), 'INPUT_SOURCE_UNVERIFIED', 'Input path belongs to another user')
+    return path
+
+
+def _root():
+    return _safe(db.root() / 'inputs')
+
+
+def _write(path, value, *, replace=False):
+    path = _safe(path)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    content = (_canonical(value) + '\n').encode('utf-8')
+    if not replace:
+        with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600), 'wb') as out:
+            out.write(content)
+        return
+    fd, temporary = tempfile.mkstemp(prefix='.' + path.name, dir=path.parent)
+    try:
+        with os.fdopen(fd, 'wb') as out:
+            out.write(content)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def _read(path):
+    path = _safe(path)
+    require(path.is_file(), 'INPUT_SOURCE_UNAVAILABLE', 'Captured input is unavailable; submit the request in Claude again')
+    require(path.stat().st_size <= 4 * LIMIT, 'CONTEXT_TOO_LARGE', 'Stored input exceeds its size limit')
+    try:
+        value = json.loads(path.read_text())
+    except (ValueError, UnicodeError) as exc:
+        raise Error('INPUT_SOURCE_UNVERIFIED', 'Stored input is invalid') from exc
+    require(isinstance(value, dict), 'INPUT_SOURCE_UNVERIFIED', 'Stored input must be an object')
+    return value
+
+
+def _automated(text):
+    return text.lstrip().lower().startswith(_AUTOMATED)
+
+
+def independent_intent(text):
+    if not isinstance(text, str):
+        return False
+    if _automated(text):
+        return False
+    if re.search(r'독립.{0,12}(?:하지\s*마|안\s*해|말고)|(?:not|don.t)\s+(?:an?\s+)?(?:independent|blind)', text, re.I):
+        return False
+    return bool(re.search(r'독립.{0,40}(?:검토|분석|토론)|(?:independent(?:ly)?|blind).{0,40}(?:review|analysis|analy[sz]e|discuss)', text, re.I))
+
+
+def _cancel_independent(text):
+    return bool(re.search(r'독립.{0,25}(?:취소|중단|말고|대신|하지\s*마)|(?:cancel|stop|not).{0,25}(?:independent|blind)', text, re.I)
+                or re.fullmatch(r'(?:취소|그만|그만해|cancel|stop)[.!\s]*', text.strip(), re.I))
+
+
+def _identity(actor):
+    require(actor.get('kind') == 'claude', 'CAPABILITY_UNSUPPORTED', 'Captured independent input currently supports Claude callers')
+    evidence = actor.get('evidence', actor)
+    if isinstance(evidence, str):
+        try:
+            evidence = json.loads(evidence)
+        except ValueError:
+            evidence = {}
+    result = {'surface_id': actor.get('surface_id'),
+              'process_id': evidence.get('process_id'), 'process_start': evidence.get('process_start')}
+    require(all(isinstance(v, str) and v for v in result.values()),
+            'INPUT_SOURCE_UNVERIFIED', 'Exact caller process evidence is required for captured input')
+    return result
+
+
+def _actor_key(actor):
+    return _hash(_canonical(_identity(actor)))
+
+
+def _transcript(session_id, path):
+    valid_id(session_id)
+    require(isinstance(path, str) and Path(path).is_absolute(),
+            'INPUT_SOURCE_UNVERIFIED', 'A native absolute transcript path is required')
+    path = _safe(path)
+    projects = _safe(Path(os.environ.get('CLAUDE_CONFIG_DIR', Path.home() / '.claude')) / 'projects')
+    require(path.is_relative_to(projects) and path.name == session_id + '.jsonl',
+            'INPUT_SOURCE_UNVERIFIED', 'Transcript must be the native Claude session file')
+    return path
+
+
+def capture(payload):
+    require(isinstance(payload, dict) and payload.get('hook_event_name') == 'UserPromptSubmit',
+            'INPUT_SOURCE_UNVERIFIED', 'Input capture requires the native prompt hook event')
+    prompt = payload.get('prompt')
+    require(isinstance(prompt, str) and len(prompt.encode('utf-8')) <= LIMIT,
+            'INVALID_ARGUMENT', 'Prompt must be a string within the input limit')
+    if _automated(prompt) or payload.get('agent_id') or payload.get('isMeta') or payload.get('isSidechain'):
+        return {'ignored': True}
+    session_id = payload.get('session_id')
+    path = _transcript(session_id, payload.get('transcript_path', ''))
+    current = sessions.identity()
+    owner = _identity(current)
+    key = _actor_key(current)
+    head_path = _root() / 'heads' / (key + '.json')
+    previous = _read(head_path).get('capture_id') if head_path.exists() else None
+    capture_id = uuid.uuid4().hex
+    record = {'capture_id': capture_id, 'session_id': session_id, 'transcript_path': str(path),
+              'prompt_hash': _hash(prompt), 'identity': owner, 'independent_intent': independent_intent(prompt),
+              'previous_capture_id': previous, 'created_at': datetime.now(timezone.utc).isoformat()}
+    _write(_root() / 'captures' / (capture_id + '.json'), record)
+    _write(head_path, {'capture_id': capture_id}, replace=True)
+    return {'capture_id': capture_id, 'independent_intent': record['independent_intent']}
+
+
+def _capture(capture_id, actor):
+    if capture_id is None:
+        capture_id = _read(_root() / 'heads' / (_actor_key(actor) + '.json')).get('capture_id')
+    valid_id(capture_id)
+    record = _read(_root() / 'captures' / (capture_id + '.json'))
+    require(record.get('capture_id') == capture_id and record.get('identity') == _identity(actor),
+            'INPUT_SOURCE_UNVERIFIED', 'Captured input belongs to a different Claude instance')
+    return record
+
+
+def _human(record, session_id):
+    text = record.get('message', {}).get('content')
+    return (record.get('type') == 'user' and record.get('sessionId') == session_id
+            and record.get('origin') == {'kind': 'human'} and record.get('turnOrigin') == 'human'
+            and record.get('promptSource') in ('typed', 'queued') and record.get('isSidechain') is False
+            and not any(record.get(key) for key in ('isMeta', 'isCompactSummary', 'isSynthetic', 'sourceToolAssistantUUID'))
+            and isinstance(text, str) and not _automated(text))
+
+
+def _sources(record):
+    path = _transcript(record['session_id'], record['transcript_path'])
+    require(path.is_file(), 'INPUT_SOURCE_UNAVAILABLE', 'Wait for the native user message to be recorded, then retry')
+    resolution_path = _root() / 'resolved' / (record['capture_id'] + '.json')
+    resolved = _read(resolution_path) if resolution_path.exists() else None
+    rows, match = [], None
+    seen = set()
+    with path.open(encoding='utf-8') as stream:
+        for line in stream:
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(entry, dict) or not _human(entry, record['session_id']):
+                continue
+            mid = entry.get('uuid')
+            if not isinstance(mid, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', mid):
+                continue
+            require(mid not in seen, 'INPUT_SOURCE_UNVERIFIED', 'Transcript has duplicate message identities')
+            seen.add(mid)
+            text = entry['message']['content']
+            require(len(text.encode('utf-8')) <= LIMIT, 'CONTEXT_TOO_LARGE', 'User source message exceeds the input limit')
+            digest = _hash(text)
+            rows.append({'message_id': mid, 'text': text, 'sha256': digest})
+            if digest == record['prompt_hash'] and (not resolved or resolved.get('message_id') == mid):
+                match = len(rows) - 1
+                if resolved:
+                    break
+    require(match is not None, 'INPUT_SOURCE_UNVERIFIED',
+            'The captured prompt is not a verified native human transcript message; ask the user to state the topic directly')
+    rows = rows[:match + 1]
+    if not resolved:
+        try:
+            _write(resolution_path, {'message_id': rows[-1]['message_id'], 'sha256': rows[-1]['sha256']})
+        except FileExistsError:
+            return _sources(record)
+    else:
+        require(resolved.get('sha256') == rows[-1]['sha256'], 'INPUT_SOURCE_UNVERIFIED', 'Captured transcript source changed')
+    return rows
+
+
+def list_sources(capture_id, actor):
+    record = _capture(capture_id, actor)
+    rows = _sources(record)
+    require(sum(len(row['text'].encode('utf-8')) for row in rows) <= 4 * LIMIT,
+            'CONTEXT_TOO_LARGE', 'Session input history is too large; ask the user for a concise review topic')
+    return {'capture_id': record['capture_id'], 'sources': rows,
+            'provenance': 'native_claude_human_transcript', 'independent_intent': record['independent_intent']}
+
+
+def _substantive(text):
+    # Only recognize obvious directives/acknowledgements; semantic uncertainty stays with the caller.
+    stripped = text.strip()
+    if re.fullmatch(r'(?:ㅇㅇ|응|네|넵|좋아|그래|해줘|진행해|ㄱㄱ|ok|okay|yes|go)[.!\s]*', stripped, re.I):
+        return False
+    residue = re.sub(r'독립적으로|독립적|독립|검토해줘|검토해|검토|분석해줘|분석해|분석|토론해줘|토론해|토론|해\s*주세요|해봐|해주세요|부탁해|해줘|해라|옆에|옆|애랑|걔랑|이거|이것|그거|그것|저거|둘이|너네|한번|다시|야|좀|codex|claude|코덱스|클로드|independently|independent|blind|review|analy[sz]e|analysis|discuss|this|that|please|with|peer', '', stripped, flags=re.I)
+    residue = re.sub(r'[\W_]+', '', residue)
+    return len(residue) >= 4
+
+
+def prepare(capture_id, actor, from_message=None):
+    record = _capture(capture_id, actor)
+    rows = _sources(record)
+    if from_message is not None:
+        matches = [index for index, item in enumerate(rows) if item['message_id'] == from_message]
+        require(len(matches) == 1, 'INPUT_SOURCE_UNVERIFIED', 'Scope must begin at a recorded human source message')
+        start = matches[0]
+    else:
+        starts = [index for index, item in enumerate(rows) if _substantive(item['text'])]
+        require(starts, 'INPUT_SCOPE_REQUIRED', 'Ask one focused question about the review subject; do not invent it')
+        start = starts[-1]
+    selected = rows[start:]
+    raw_topic = '\n\n'.join(item['text'] for item in selected)
+    require(len(raw_topic.encode('utf-8')) <= LIMIT, 'CONTEXT_TOO_LARGE', 'Selected source input exceeds the topic limit')
+    source_refs = [{'message_id': item['message_id'], 'sha256': item['sha256']} for item in selected]
+    public = {'raw_topic': raw_topic, 'sources': source_refs, 'provenance': 'native_claude_human_transcript'}
+    input_id = _hash(_canonical({'capture_id': record['capture_id'], **public}))
+    bundle = {'input_id': input_id, 'capture_id': record['capture_id'], 'identity': record['identity'],
+              'source_records': selected, **public}
+    bundle['content_hash'] = _hash(_canonical(bundle))
+    path = _root() / 'bundles' / (input_id + '.json')
+    try:
+        _write(path, bundle)
+    except FileExistsError:
+        require(_read(path) == bundle, 'INPUT_SOURCE_UNVERIFIED', 'Existing input bundle differs')
+    return {'input_id': input_id, **public}
+
+
+def load_bundle(input_id, actor):
+    valid_id(input_id)
+    bundle = _read(_root() / 'bundles' / (input_id + '.json'))
+    expected = bundle.pop('content_hash', None)
+    require(bundle.get('input_id') == input_id and expected == _hash(_canonical(bundle)),
+            'INPUT_SOURCE_UNVERIFIED', 'Stored input bundle changed')
+    require(bundle.get('identity') == _identity(actor), 'INPUT_SOURCE_UNVERIFIED', 'Input belongs to another Claude instance')
+    require(bundle.get('provenance') == 'native_claude_human_transcript', 'INPUT_SOURCE_UNVERIFIED', 'Unknown input provenance')
+    return {key: bundle[key] for key in ('input_id', 'capture_id', 'raw_topic', 'sources', 'provenance')}
+
+
+def mark_consumed(input_id, actor, run_id):
+    bundle = load_bundle(input_id, actor)
+    valid_id(run_id)
+    marker = _root() / 'consumed' / (bundle['capture_id'] + '.json')
+    value = {'input_id': input_id, 'run_id': run_id}
+    try:
+        _write(marker, value)
+    except FileExistsError:
+        require(_read(marker) == value, 'INPUT_SOURCE_UNVERIFIED', 'Capture already belongs to another independent run')
+
+
+def requires_engine(actor):
+    if actor.get('kind') != 'claude':
+        return False
+    head = _root() / 'heads' / (_actor_key(actor) + '.json')
+    if not head.exists():
+        return False
+    capture_id = _read(head).get('capture_id')
+    for _ in range(32):
+        record = _capture(capture_id, actor)
+        try:
+            sources = _sources(record)
+        except Error as exc:
+            if exc.code not in ('INPUT_SOURCE_UNVERIFIED', 'INPUT_SOURCE_UNAVAILABLE'):
+                raise
+            if record['independent_intent']:
+                return True
+            capture_id = record.get('previous_capture_id')
+            if capture_id:
+                continue
+            return False
+        if not record['independent_intent']:
+            if (_root() / 'consumed' / (record['capture_id'] + '.json')).exists() or _cancel_independent(sources[-1]['text']):
+                return False
+            capture_id = record.get('previous_capture_id')
+            if capture_id:
+                continue
+            return False
+        return not (_root() / 'consumed' / (record['capture_id'] + '.json')).exists()
+    raise Error('INPUT_SOURCE_UNVERIFIED', 'Input provenance chain needs a new direct user request')
+
+
+def add_parser(subparsers):
+    parser = subparsers.add_parser('input', help='Use captured user messages without model rewriting')
+    actions = parser.add_subparsers(dest='input_command', required=True)
+    actions.add_parser('capture')
+    sources = actions.add_parser('sources')
+    sources.add_argument('capture_id', nargs='?')
+    prepare_parser = actions.add_parser('prepare')
+    prepare_parser.add_argument('capture_id')
+    prepare_parser.add_argument('--from-message')
+    actions.add_parser('show').add_argument('input_id')
+
+
+def run(args):
+    if args.input_command == 'capture':
+        return capture(json.load(sys.stdin))
+    with closing(db.connect(readonly=True)) as conn:
+        actor = sessions.actor(conn)
+    if args.input_command == 'sources':
+        return list_sources(args.capture_id, actor)
+    if args.input_command == 'prepare':
+        return prepare(args.capture_id, actor, args.from_message)
+    return load_bundle(args.input_id, actor)
+
+
+def hook_main():
+    try:
+        payload = json.load(sys.stdin)
+        result = capture(payload)
+        if result.get('independent_intent'):
+            runtime = Path(__file__).resolve().parents[1] / 'crosstalk'
+            instruction = ('This prompt may request independent review. If the user is only describing the feature or quoting an example, do not start a discussion. '
+                           'For an actual independent-review request, do not compose a peer message or use raw send. '
+                           f'Use the Crosstalk executable at {runtime} to read capabilities --json and its independent_instructions file. '
+                           'Use input sources and input prepare with '
+                           f'capture ID {result["capture_id"]}. Reuse verbatim recorded user messages, not assistant opinions. '
+                           'If the subject is unclear, ask one focused question. Never claim an unverified source is user approved.')
+            print(json.dumps({'hookSpecificOutput': {'hookEventName': 'UserPromptSubmit', 'additionalContext': instruction}}))
+    except (Error, OSError, ValueError, TypeError) as exc:
+        if isinstance(locals().get('payload'), dict) and independent_intent(payload.get('prompt', '')):
+            print(json.dumps({'hookSpecificOutput': {'hookEventName': 'UserPromptSubmit', 'additionalContext':
+                'Independent review input capture failed. Do not send a rewritten first request or claim protected input. Ask for the exact review topic or repair input capture.'}}))
+        print('Crosstalk input capture unavailable: ' + str(exc), file=sys.stderr)
+
+
+if __name__ == '__main__':
+    hook_main()

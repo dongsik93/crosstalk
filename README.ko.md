@@ -3,7 +3,7 @@
 [English](README.md) | [한국어](README.ko.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.12.0--dev-blue)
+![Version](https://img.shields.io/badge/version-0.12.1--dev-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-black)
 
@@ -11,11 +11,11 @@ Ghostty에서 Claude와 Codex를 나란히 띄워 토의하거나, Antigravity(`
 
 ![Crosstalk hero](docs/hero.png)
 
-> v0.12.0은 검증 중입니다. Protocol 3/schema 3에 discussion engine 1을 명시적 opt-in으로 추가하며, 기존 mailbox-v2 thread는 의미를 유지합니다. [업그레이드](docs/upgrade-v0.12.md)와 [검증 기록](docs/verification-v0.12.md)을 확인하세요. 과거 실기 결과나 CI 설정만으로 새 엔진의 완료를 주장하지 않습니다.
+> v0.12.1은 Claude 호출자와 새 Codex 대화 사이의 독립 검토를 추가합니다. 자연어로 독립 검토를 요청하면 엔진 옵션 없이 보호 경로를 선택합니다. 일반 엔진 토론은 opt-in을 유지하며, 기존 mailbox-v2 thread의 의미는 바꾸지 않습니다. [독립 검토의 범위](docs/independent-review.md), [업그레이드](docs/upgrade-v0.12.md), [v0.12 검증 기록](docs/verification-v0.12.md)을 확인하세요. 전체 릴리스·실기 검증 완료를 뜻하지 않습니다.
 
 ## 소개
 
-Crosstalk은 기존 대화형 AI CLI를 연결합니다. Codex에서는 `$crosstalk <topic>`, Claude Code에서는 `/crosstalk <topic>`으로 시작합니다. 각 AI가 독립적으로 분석한 뒤 호출자가 답변을 비교합니다. 합의에 이르거나 서로 다른 의견을 존중하며 마무리하고, 억지로 의견을 맞추지는 않습니다.
+Crosstalk은 기존 대화형 AI CLI를 연결합니다. Codex에서는 `$crosstalk <topic>`, Claude Code에서는 `/crosstalk <topic>`으로 시작합니다. 호출자가 각 AI의 답변을 비교하고 억지로 의견을 맞추지는 않습니다. 첫 전달문을 보호하려면 아래 독립 검토 흐름을 사용합니다. 기존 일반 메시지함 대화가 소급해서 이 보호를 받는 것은 아닙니다.
 
 **Claude ↔ Codex 토의는 Ghostty로 시작하는 것을 권장합니다.** 고급 작업에는 기존 cmux 백엔드도 쓸 수 있습니다. 지원 범위는 다음과 같습니다.
 
@@ -23,6 +23,7 @@ Crosstalk은 기존 대화형 AI CLI를 연결합니다. Codex에서는 `$crosst
 | --- | --- | --- |
 | Claude ↔ Codex 일반 메시지함 | mailbox-v2 호환 경로 유지 | 레거시 지원, Codex 호출자는 실험 단계 |
 | Discussion engine 1 (`--engine`) | caller 1명·peer 1명, 명시적 opt-in; v0.12 실기 검증 대기 | 미지원; 기존 RUN_ID 흐름 유지 |
+| 자연어 독립 검토 | Claude 호출자 → 새 Codex peer; 사용자 발언을 수집하며 `--engine` 불필요 | 미지원 |
 | 빠른 의견 수집 (`ask`) | 지원 | 지원 |
 | 상대 pane 준비 | 같은 탭에서 자체 분할 또는 재사용 | `:launch`로 워크스페이스 분할 |
 | Antigravity (`agy`) 참여 | 일반 호환 경로 유지; engine peer는 protocol 3/engine 1 준비와 실기 검증 필요 | 레거시 지원 |
@@ -31,7 +32,19 @@ Crosstalk은 기존 대화형 AI CLI를 연결합니다. Codex에서는 `$crosst
 
 실제 점검 내용과 한계는 [Ghostty 검증 기록](docs/ghostty-verification.md)을 참고하세요. 이 소스에는 Ghostty 연동이 포함되어 있습니다. 마켓플레이스에서 예전 버전을 설치했다면 빠른 시작을 따라 하기 전에 업데이트해야 합니다.
 
-## 토론 엔진 opt-in (v0.12)
+## 평소 대화에서 독립 검토하기 (v0.12.1)
+
+Claude와 평소처럼 이야기하다가 이렇게 말하면 됩니다.
+
+> 야, 이거 옆에 Codex랑 독립적으로 좀 검토해.
+
+Crosstalk이 기록된 사용자 질문과 이후 사용자 제약을 묶습니다. Claude가 자기 결론을 섞어 첫 전달문을 다시 쓰지 않습니다. 주제가 분명하면 바로 진행하고, 범위나 출처가 불명확할 때만 한 번 짧게 확인합니다. 사용자가 엔진 옵션을 알거나 매 라운드 승인할 필요는 없습니다.
+
+Claude는 기존 문맥을 유지하고, Codex는 해당 입력용 새 대화로 옆 pane에 실행합니다. 기존 Codex 대화를 지우거나 닫지는 않습니다. 두 첫 답변을 저장한 뒤 공개하고, 이후에는 같은 대화에서 의견과 근거를 교환합니다.
+
+업데이트된 Claude 플러그인의 입력 capture hook과 런타임이 필요하므로 설치 후 플러그인/세션 지침을 다시 읽어야 합니다. 첫 독립 요청에는 임의 body·rules·persona를 덧붙이지 못합니다. “Claude가 만든 설계안을 검토해”는 별도 제안서 검토로 표시하며, 기존 문맥의 추가 의견을 독립 검토로 부르지 않습니다. 새 대화도 프로젝트 지침과 공유 파일을 읽을 수 있어 완전한 무문맥·무편향 보장은 아닙니다. [상세 동작과 한계](docs/independent-review.md)를 참고하세요.
+
+## 일반 토론 엔진 opt-in (v0.12)
 
 엔진은 현재 run·round·action·고정 입력과 종료 이유를 저장합니다. 분석과 비교 판단은 AI가, 진행 절차와 원자적 상태 변경은 코드가 담당합니다. 실기 게이트를 통과하기 전에는 명시적으로 선택합니다.
 
@@ -44,7 +57,7 @@ $crosstalk analyze --engine <주제>
 $crosstalk ask --engine <질문>
 ```
 
-양쪽에 protocol-3/engine-1 준비가 필요합니다. `capabilities --json`의 `discussion_instructions`가 알려주는 [공통 workflow](assets/codex-skills/crosstalk/discussion.md)를 따릅니다. `run start` 자체가 저수준 opt-in이며, `engine_default=false`인 동안 옵션 없는 새 요청은 일반 메시지함 경로를 유지합니다. 기존 thread/run의 실행 소유자를 조용히 바꾸지 않습니다.
+양쪽에 protocol-3/engine-1 준비가 필요합니다. `capabilities --json`의 `discussion_instructions`가 알려주는 [공통 workflow](assets/codex-skills/crosstalk/discussion.md)를 따릅니다. `run start` 자체가 저수준 opt-in이며, `engine_default=false`인 동안 그 외의 옵션 없는 새 요청은 일반 메시지함 경로를 유지합니다. 자연어 독립 검토 요청은 별도의 보호 경로를 자동 선택합니다. 기존 thread/run의 실행 소유자를 조용히 바꾸지 않습니다.
 
 caller가 첫 분석을 저장하기 전에는 Crosstalk API가 peer의 첫 답변을 공개하지 않습니다. 이는 공개 순서에 대한 보장이며 옆 pane이나 기존 문맥의 영향을 격리하는 보장은 아닙니다. 비교 결정은 해당 round의 고정 결과를 참조하며, peer의 agree만으로 합의나 정답을 인증하지 않습니다. 결과는 호출자의 비교 결론·이견 유지·정보 부족·라운드 상한 종료를 구분합니다.
 
@@ -57,7 +70,7 @@ Ask는 각 답변을 저장하고 sampled로 끝납니다. compare·추가 round
 - **눈으로 보는 토의**: 어느 CLI에서 시작하든 이웃한 Ghostty pane에서 Claude와 Codex의 작업을 볼 수 있습니다.
 - **기존 CLI 계정 사용**: 별도의 모델 API 연동을 추가하지 않습니다.
 - **상대 AI 자동 준비**: 같은 탭에 라벨이 지정된 상대 pane이 없으면 현재 디렉터리에서 다른 CLI를 실행합니다. 시작 확인을 받은 뒤 작업을 보냅니다.
-- **독립적인 답변**: 각 AI에게 사용자의 원래 주제를 전달합니다.
+- **첫 독립 입력 보호**: Claude capture 흐름에서는 호출자가 재작성한 결론 대신 기록된 사용자 발언과 중립 지침을 전달합니다.
 - **영속 메시지함**: Ghostty의 요청과 답변을 SQLite에 저장합니다. `send`, `receive`, `reply`가 ID, 수신 상태, 답변 알림을 관리하므로 AI가 메시지별 MD 파일이나 ping 명령을 다룰 필요가 없습니다.
 - **명시적인 결과**: 일반 답변은 verdict/confidence를 유지하며, opt-in 엔진은 고정 입력 참조와 구조화된 비교 결정을 추가합니다. 기존 cmux 표식은 JSON으로 안전하게 파싱합니다.
 - **빠른 의견 수집**: `ask`는 콜백이나 결과 취합 없이 각 AI의 pane에서 답변합니다.

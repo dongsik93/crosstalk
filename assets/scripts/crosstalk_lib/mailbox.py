@@ -94,6 +94,14 @@ def create_request(conn, actor, recipient, *, mid, body, summary='', mode='analy
     require(conn.in_transaction, 'STATE_CONFLICT', 'Mailbox mutations require the service transaction')
     current_binding(conn,actor)
     current_binding(conn,recipient)
+    reservations = conn.execute("""SELECT r.run_id,r.config_snapshot FROM discussion_runs r
+        JOIN discussion_actions a ON a.run_id=r.run_id
+        WHERE r.peer_session_id=? AND r.lifecycle IN ('active','paused')
+        AND a.kind='peer_analysis' AND a.round_no=1 AND a.status='pending'""",
+        (recipient['session_id'],)).fetchall()
+    require(not any(row['run_id']!=run_id and json.loads(row['config_snapshot']).get('review_mode')=='independent'
+                    for row in reservations), 'FRESH_CONTEXT_REQUIRED',
+            'This peer is completing an independent first analysis; do not inject another request')
     if thread_id is None:
         thread_id=mid
         conn.execute('INSERT INTO threads(thread_id,caller_session_id,peer_session_id,mode,execution_owner,run_id) VALUES(?,?,?,?,?,?)',
@@ -121,10 +129,17 @@ def create_reply(conn, actor, original, *, body, summary='', verdict='none', rea
 
 
 def send(conn, actor, args, body):
+    from . import intake
+    require(not intake.requires_engine(actor),
+            'RUN_MANAGED_BY_ENGINE','Independent review must use captured input and engine actions, not a rewritten mailbox message')
     mid=valid_id(args.id or uuid.uuid4().hex)
     recipient=sessions.peer(conn,args.peer,actor,session_id=args.peer_session)
     notify=False
     with db.transaction(conn):
+        active = conn.execute("SELECT config_snapshot FROM discussion_runs WHERE caller_session_id=? AND lifecycle IN ('active','paused')",
+                              (actor['session_id'],)).fetchall()
+        require(not any(json.loads(row['config_snapshot']).get('review_mode')=='independent' for row in active),
+                'RUN_MANAGED_BY_ENGINE','Use the independent run actions instead of a separate mailbox message')
         if args.thread:
             thread=conn.execute('SELECT execution_owner FROM threads WHERE thread_id=?',(args.thread,)).fetchone()
             require(not thread or thread['execution_owner']=='mailbox-v2','RUN_MANAGED_BY_ENGINE','Use run decide for managed follow-ups')

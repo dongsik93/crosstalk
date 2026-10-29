@@ -58,10 +58,13 @@ else:
             'assets/codex-skills/crosstalk/SKILL.md': 'protocol 2 skill',
             'assets/codex-skills/crosstalk/mailbox.md': 'legacy mailbox',
             'assets/codex-skills/crosstalk/discussion.md': 'protocol 3 discussion',
+            'assets/codex-skills/crosstalk/independent.md': 'captured input independent workflow',
             'assets/user-commands/crosstalk.md': 'new command',
             'assets/agy-commands/crosstalk-peer.toml': 'prompt="new"',
             'assets/rules/en/default.md': 'new rule',
             'assets/personas/en/default.md': 'new persona',
+            'plugins/crosstalk/hooks/hooks.json': '{"hooks": {}}',
+            'plugins/crosstalk/hooks/capture.py': '# fixture hook launcher',
         }
         for name in installer.RUNTIME_MODULES:
             contents.setdefault(f'assets/scripts/crosstalk_lib/{name}.py', '# fixture runtime module\n')

@@ -1,4 +1,4 @@
-# Crosstalk v0.12 readiness
+# Crosstalk v0.12.1 readiness
 
 For status/empty invocation, inspect only. Do not launch, label, challenge, bind, receive, retry or recover merely to display state.
 
@@ -11,11 +11,11 @@ CONFIG_ROOT="${CROSSTALK_CONFIG_DIR:-$HOME/.claude/crosstalk}"
 "$BRIDGE" backend
 ```
 
-On Ghostty require runtime protocol 3, supported schema and a healthy installation. For an engine run require engine 1 and read `discussion_instructions`; ordinary `mailbox-v2` threads use `mailbox_instructions`. Engine creation remains explicit opt-in until the live gates pass. A schema migration or partial installation is an explicit upgrade task, not a side effect of readiness. Use the same `CROSSTALK_CONFIG_DIR` in both participants. On cmux retain the existing launch/setup and RUN_ID file/ping flows.
+On Ghostty require runtime protocol 3, supported schema and a healthy installation. For an engine run require engine 1 and read `discussion_instructions`; ordinary `mailbox-v2` threads use `mailbox_instructions`. General engine creation remains explicit opt-in until the live gates pass. A natural independent-review request to Claude is the separate automatic protected route: read `independent_instructions` first and use its fresh-input-bound launch, rather than reusing an existing peer. A schema migration or partial installation is an explicit upgrade task, not a side effect of readiness. Use the same `CROSSTALK_CONFIG_DIR` in both participants. On cmux retain the existing launch/setup and RUN_ID file/ping flows.
 
 ## Bind the Ghostty caller
 
-Use `bridge strict-self`, which accepts exact caller evidence and refuses label/cwd fallback. Claude/agy may find their pane through an OSC 7 TTY probe. Codex tool shells use a shared daemon, so process ancestry is not pane proof. If strict identity is unavailable, show candidates and have the user select the intended pane; never guess focus, title, cwd or kind. Inspect candidates with:
+Use `bridge strict-self`, which accepts exact caller evidence and refuses label/cwd fallback. Claude/agy first match their exact TTY to Ghostty’s TTY enumeration; an older API may need the OSC 7 compatibility probe. A successful enumeration with zero or multiple matches stops instead of guessing. Codex tool shells use a shared daemon, so process ancestry is not pane proof. If strict identity is unavailable, show candidates and have the user select the intended pane; never guess focus, title, cwd or kind. Inspect candidates with:
 
 ```bash
 osascript -e 'tell application "Ghostty" to get {id, name, working directory} of every terminal'
@@ -48,6 +48,8 @@ NONCE=$(printf '%s' "$CHALLENGE" | jq -er '.challenge') || exit 1
 For an existing peer, create `session challenge --surface <EXACT_SURFACE> --kind <KIND> --protocol 3 --engine-version 1 --notify` and let that target execute its own transport/protocol bind. Check session status before sending. For an authorized transfer, include `--session-id <LOGICAL_ID> --expected-generation <N>` on challenge, then the target uses `session rebind --challenge <NONCE> --kind <KIND> --protocol 3 --engine-version 1 --confirm-transfer`. If using `--notify` for that transfer, also supply challenge's `--confirm-transfer` only after user authorization. Keep nonce/token values out of ordinary conversation.
 
 ## Prepare a peer for a requested topic
+
+For independent review, follow `independent.md`: use `launch codex --fresh-for-input <INPUT_ID>` and keep its saved run/input IDs. The ordinary `ensure-peer` reuse below is not a fresh-context guarantee.
 
 After the caller is bound, use its actual kind (Codex=`codex`, Claude=`claude`) and the requested peer (other kind by default, `antigravity` only when requested):
 

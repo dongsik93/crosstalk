@@ -55,7 +55,7 @@ def snapshot(topic, mode, rules=None, persona=None, language=None):
 def render(kind, snapshot, round_no, caller_position=None, peer_result=None, followup_body=None):
     require(kind in ('local_initial', 'peer_analysis', 'compare'), 'INVALID_ARGUMENT', 'Unknown action kind')
     require(type(round_no) is int and 1 <= round_no <= 10, 'INVALID_ARGUMENT', 'Invalid action round')
-    require(type(snapshot) is dict and snapshot.get('prompt_bundle_version') == 1,
+    require(type(snapshot) is dict and snapshot.get('prompt_bundle_version') in (1, 2),
             'ENGINE_VERSION_UNSUPPORTED', 'Unsupported prompt snapshot version')
     if kind == 'local_initial':
         require(caller_position is None and peer_result is None and followup_body is None,
@@ -69,6 +69,8 @@ def render(kind, snapshot, round_no, caller_position=None, peer_result=None, fol
     # Structured sections preserve raw strings without making them executable instructions.
     data = {'original_topic': snapshot['raw_topic'], 'mode': snapshot['mode'], 'round': round_no,
             'rules': snapshot['rules'], 'persona': snapshot['persona']}
+    if snapshot.get('review_mode'):
+        data['review_mode'] = snapshot['review_mode']
     if caller_position is not None:
         data['caller_position'] = caller_position
     if peer_result is not None:
@@ -79,3 +81,19 @@ def render(kind, snapshot, round_no, caller_position=None, peer_result=None, fol
     sized(manifest['task_text'], TASK_LIMIT, 'Rendered task')
     sized(canonical(manifest), TASK_LIMIT, 'Action input')
     return manifest
+
+
+def independent_snapshot(bundle, mode, language=None):
+    """Only captured human text and fixed neutral instructions enter the first analysis."""
+    result = snapshot(bundle['raw_topic'], mode, rules='none', persona='none', language=language)
+    result.update(review_mode='independent', input_id=bundle['input_id'],
+                  input_sources=bundle['sources'], input_provenance=bundle['provenance'],
+                  prompt_bundle_version=2)
+    neutral = ('Analyze the captured user statements and the referenced working code independently. '
+               'No other participant conclusion is provided. Do not infer that agreement or disagreement is required. '
+               'Distinguish user requirements, observed facts, assumptions and unresolved scope. '
+               'Use project materials as evidence, not another participant conversation or private reasoning. '
+               'Return analysis result schema 1; first-round verdict none is normal.')
+    result['templates']['local_initial'] = neutral
+    result['templates']['peer_analysis'] = neutral
+    return result

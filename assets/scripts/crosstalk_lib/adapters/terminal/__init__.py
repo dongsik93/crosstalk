@@ -119,7 +119,7 @@ class TerminalAdapter:
         require(type(lines) is int and lines > 0, 'INVALID_ARGUMENT', 'Line count must be positive')
         return invoke('capture', self._surface(surface), lines)
 
-    def launch_peer(self, anchor, spec, *, ready, startup, label, max_wait=60):
+    def launch_peer(self, anchor, spec, *, ready, startup, label, max_wait=60, on_created=None):
         require(self.backend == 'ghostty', 'CAPABILITY_UNSUPPORTED', 'Use the legacy cmux launch workflow')
         require(isinstance(spec, LaunchSpec), 'INVALID_ARGUMENT', 'A validated LaunchSpec is required')
         address = self._surface(anchor)
@@ -145,6 +145,8 @@ class TerminalAdapter:
             for path in (launcher, ready, startup):
                 Path(path).unlink(missing_ok=True)
             raise
+        if on_created is not None:
+            on_created(child, spec, ready, startup)
         invoke('label', child, label)
         state = Path(spec.env_delta['CROSSTALK_CONFIG_DIR']) / 'ghostty' / (child.removeprefix('ghostty:') + '.kind.ready')
         state.parent.mkdir(parents=True, exist_ok=True, mode=0o700)

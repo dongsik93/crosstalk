@@ -6,7 +6,9 @@ argument-hint: [--engine] <질문>
 
 # /crosstalk:ask (가벼운 의견 수집 — fire-and-forget)
 
-For Ghostty, first check `crosstalk capabilities --json` and exact readiness. New `--engine` requests explicitly opt into the discussion engine; read its returned `discussion_instructions` (canonical `discussion.md`) and stop before the legacy steps below. Without that opt-in, ordinary mailbox-v2 work follows `mailbox_instructions`. Incoming previews call `receive`; `handler=discussion` routes to `run take/submit/decide` using the canonical workflow, never to a fresh start or raw managed reply/ack. Existing explicit RUN_ID triggers and cmux alone use the legacy steps below. Runtime protocol is 3; new engine participants require protocol 3 and engine 1 readiness.
+For a natural independent-review request to Claude (for example “야, 옆에 애랑 독립적으로 검토해”), read `independent_instructions` from capabilities and use that protected workflow automatically; no `--engine` option is required. It uses recorded user sources and an input-bound fresh Codex conversation. Do not write a first peer body yourself or fall back to ordinary send. In Codex, handle received independent work through its managed discussion action; initiating this captured-input route from Codex is currently unsupported. A proposal critique or additional opinion must be labeled accordingly, not called independent review.
+
+For Ghostty, first check `crosstalk capabilities --json` and exact readiness. New `--engine` requests explicitly opt into the discussion engine; read its returned `discussion_instructions` (canonical `discussion.md`) and stop before the legacy steps below. For other requests without that opt-in, ordinary mailbox-v2 work follows `mailbox_instructions`. Incoming previews call `receive`; `handler=discussion` routes to `run take/submit/decide` using the canonical workflow, never to a fresh start or raw managed reply/ack. Existing explicit RUN_ID triggers and cmux alone use the legacy steps below. Runtime protocol is 3; new engine participants require protocol 3 and engine 1 readiness.
 
 ## Legacy cmux / explicit RUN_ID only
 

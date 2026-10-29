@@ -92,6 +92,12 @@ def build(run, rounds, actions, messages):
         result['decision'] = None
         result['individual_answers'] = {'caller': result['initial_position'],
                                         'peer': result['rounds'][0]['peer_result'] if result['rounds'] else None}
+    result['review_mode'] = snapshot.get('review_mode', 'discussion')
+    result['input_provenance'] = snapshot.get('input_provenance', 'caller_supplied')
+    result['input_sources'] = snapshot.get('input_sources', [])
+    result['peer_context'] = snapshot.get('peer_context', {'origin': 'existing_or_unverified'})
+    if result['review_mode'] == 'independent':
+        result['limitations'].append('The caller retains prior context; the peer was newly launched for the captured input. Project instructions and shared files are not isolated.')
     return result
 
 
@@ -103,6 +109,7 @@ def markdown(data):
         fence = '`' * max(3, longest + 1)
         return fence + '\n' + text + '\n' + fence
     lines = ['# Discussion result', '', data['outcome_label'], '', '## Original topic', '', quote(data['original_topic'])]
+    lines[2:2] = ['Review mode: ' + data.get('review_mode', 'discussion'), '']
     if data.get('missing_participants'):
         lines.extend(['', 'Missing participant results: ' + ', '.join(data['missing_participants'])])
     for row in data['rounds']:

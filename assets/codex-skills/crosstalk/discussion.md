@@ -4,7 +4,7 @@ This is the single workflow for `execution_owner=discussion-v1`. Runtime protoco
 
 ## Entry and exact execution context
 
-Capabilities must report `engine_available=true`, `engine_version=1`; `engine_default=false` means the engine remains opt-in while its live release gates are pending. An explicit `--engine` choice in the user-facing analyze/ask command routes here; `run start` is the low-level engine entry. Ordinary existing `mailbox-v2` threads continue through `mailbox.md`. Never convert an existing thread into a run or silently fall back to mailbox/legacy when an engine command fails.
+Capabilities must report `engine_available=true`, `engine_version=1`; `engine_default=false` means the engine remains opt-in while its live release gates are pending. An explicit `--engine` choice in the user-facing analyze/ask command routes here; `run start` is the low-level engine entry. Natural independent-review requests to Claude instead enter `independent_instructions` automatically, prepare captured user input and a fresh Codex peer, then use these same action/lease/result steps. They do not require the user to supply `--engine`. Ordinary existing `mailbox-v2` threads continue through `mailbox.md`. Never convert an existing thread into a run or silently fall back to mailbox/legacy when an engine command fails.
 
 Run the actual installed runtime's `capabilities --json`; require protocol 3, schema 3, engine 1, the discussion instructions path, and installation health. Read this file from the returned path. A partial installation, unsupported capability, or old in-memory instructions requires repair/reload, not tokenless compatibility or implicit migration. Both participants complete challenge **and** bind with `--protocol 3 --engine-version 1`; see `readiness.md`.
 
@@ -19,6 +19,8 @@ export CROSSTALK_CONFIG_DIR="<SHARED_CONFIG_ROOT>" CROSSTALK_SURFACE_ID="ghostty
 Repeat the exports in each new tool shell; placeholders above must be replaced using verified context, not guessed.
 
 ## Start only for an actual new user request
+
+If the user requested independent review, complete `independent.md` preparation and use `run start codex --input-id <ID> --review-mode independent --operation-id <ID>` with no free topic, stdin, rules or persona. The free-body examples below are for ordinary engine discussions. `--review-mode proposal_review` labels an intentionally opinionated proposal critique; `--review-mode additional_opinion` does not claim a fresh first context. Never use either as a silent fallback for a requested independent review.
 
 Preserve the user's raw topic byte-for-byte. Generate an operation ID once for this logical start and retain it across retries. Rules/persona names select snapshots; do not concatenate their contents into a rewritten topic or edit preset files. Use one peer, defaulting to the other caller kind; choose `antigravity` only when requested. A supplied `--peer-session` selects the intended logical participant. Optional `--peer-surface` records the exact user-selected or directly launched pending pane; it is preparation intent, not proof of logical ownership. If both are provided, the same verified binding must satisfy both.
 

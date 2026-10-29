@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.12.1 — unreleased
+
+Natural independent-review requests to Claude now select a captured-input engine workflow without requiring the user to know `--engine`.
+
+- Record prompt capture metadata and resolve eligible native human transcript messages; exclude assistant/tool/automation content instead of accepting a rewritten first body.
+- Prepare a contiguous user-source bundle, with one focused clarification only when the subject or source cannot be established. Independent start accepts its ID and fixed neutral instructions, not caller-supplied body/rules/persona.
+- Launch a fresh Codex conversation for that input, retain existing panes, and reuse the exact pending launch on retries. Keep short startup text and explicit per-launch permissions.
+- Preserve immutable initial answers and generic notifications; exchange positions only after first results are stored.
+- Label independent review, proposal critique and existing-context additional opinion separately. Normal mailbox/legacy conversations retain their owners.
+
+This first protected intake supports Claude as caller and Codex as peer. A new process does not erase project instructions or shared files, and native transcript metadata is not cryptographic human authentication. Updated plugin hooks and runtime must be loaded. Targeted checks do not certify the full live release matrix. See [independent review](docs/independent-review.md).
+
 ## 0.12.0 — unreleased
 
 Discussion engine 1 is explicit opt-in (`run start`, or analyze/ask `--engine`) while live gates remain pending. Runtime protocol and database schema move to 3; existing mailbox-v2 threads retain their owner and behavior. The source baseline is v0.11 commit `0d8a24e692bfde2ee3ee61fe84731050b85b0c0f`.
