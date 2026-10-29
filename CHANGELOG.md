@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.12.2
+
+- Bind capture to native hook `prompt_id` and transcript `promptId`; use body hashes only to verify content. Repeated text cannot select a past or future turn. Unstarted older captures require a new request.
+- Validate explicit and automatic source ranges alike; reject subjectless selections and ambiguous automatic ranges instead of dropping the original question.
+- Store capture consumption in the same committed run snapshot; derive status from the DB, including compatible v0.12.1 runs, without depending on a separate marker file.
+- Separate mentions/examples from actual requests. Candidates do not block ordinary sends, confirmed request source failures cannot fall back, and failed prompt capture blocks native processing.
+- Prevent synthetic PID collisions and missing-inner-TTY crashes in the bridge fixture.
+
+
 ## 0.12.1 — unreleased
 
 Natural independent-review requests to Claude now select a captured-input engine workflow without requiring the user to know `--engine`.

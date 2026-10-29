@@ -3,7 +3,7 @@
 English | [한국어](README.ko.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.12.1--dev-blue)
+![Version](https://img.shields.io/badge/version-0.12.2--dev-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-black)
 
@@ -11,7 +11,7 @@ Discuss a topic with Claude and Codex side by side in Ghostty, or invite Antigra
 
 ![Crosstalk hero](docs/hero.png)
 
-> v0.12.1 adds captured-input independent review for a Claude caller and fresh Codex peer. Natural independent-review requests select that route without an engine option. General engine discussions remain opt-in; existing mailbox-v2 threads keep their meaning. Read the [independent-review boundary](docs/independent-review.md), [upgrade guide](docs/upgrade-v0.12.md) and [v0.12 verification record](docs/verification-v0.12.md). Full release/live verification is not implied.
+> v0.12.2 adds captured-input independent review for a Claude caller and fresh Codex peer. Natural independent-review requests select that route without an engine option. General engine discussions remain opt-in; existing mailbox-v2 threads keep their meaning. Read the [independent-review boundary](docs/independent-review.md), [upgrade guide](docs/upgrade-v0.12.md) and [v0.12 verification record](docs/verification-v0.12.md). Full release/live verification is not implied.
 
 ## Overview
 
@@ -32,7 +32,7 @@ Crosstalk connects existing interactive AI CLIs. Start from Codex with `$crossta
 
 See the [Ghostty verification record](docs/ghostty-verification.md) for the actual checks and their limits. This checkout includes the Ghostty integration. Update older marketplace installations before following the quick start.
 
-## Independent review from normal conversation (v0.12.1)
+## Independent review from normal conversation (v0.12.2)
 
 Keep discussing the task with Claude, then say:
 

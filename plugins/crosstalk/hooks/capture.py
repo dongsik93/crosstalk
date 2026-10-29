@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Load the installed capture hook, or the source checkout during development."""
 import os
+import json
 from pathlib import Path
 import sys
 
@@ -15,4 +16,4 @@ if __name__ == '__main__':
         from crosstalk_lib.intake import hook_main
         hook_main()
     except ImportError:
-        print('Crosstalk input capture requires the v0.12.1 runtime installation.', file=sys.stderr)
+        print(json.dumps({'decision': 'block', 'reason': 'Crosstalk input capture runtime is unavailable. Repair the installation or disable its hook before continuing.'}))

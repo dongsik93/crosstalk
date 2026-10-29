@@ -9,7 +9,9 @@ from unittest.mock import patch
 from engine_helpers import EngineCase, A, B, C
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'assets/scripts'))
-from crosstalk_lib import intake
+from crosstalk_lib import intake, db, sessions, cli
+from crosstalk_lib.engine import service
+from crosstalk_lib.protocol import Error
 
 
 class IndependentReviewTests(EngineCase):
@@ -21,7 +23,7 @@ class IndependentReviewTests(EngineCase):
         transcript.parent.mkdir(parents=True)
         self.trigger = '야 옆에 애랑 독립적으로 좀 검토해'
         def human(mid,text):
-            return dict(type='user',sessionId='claude-session',uuid=mid,origin={'kind':'human'},
+            return dict(type='user',sessionId='claude-session',uuid=mid,promptId=mid,origin={'kind':'human'},
                         turnOrigin='human',promptSource='typed',isSidechain=False,message={'content':text})
         records=[human('question','Compose와 XML 중 이 화면에 적합한 것을 판단해줘.'),
                  dict(type='assistant',message={'content':'PRIVATE_CLAUDE_COMPOSE_IS_BEST'}),
@@ -29,7 +31,7 @@ class IndependentReviewTests(EngineCase):
         transcript.write_text('\n'.join(json.dumps(x,ensure_ascii=False) for x in records)+'\n')
         with patch.dict(os.environ,self.env|{'TEST_ACTOR':B}):
             self.capture = intake.capture(dict(hook_event_name='UserPromptSubmit',session_id='claude-session',
-                                                transcript_path=str(transcript),prompt=self.trigger))
+                                                transcript_path=str(transcript),prompt=self.trigger,prompt_id='request'))
         self.bundle = self.call('input','prepare',self.capture['capture_id'],'--from-message','question',actor=B)
         with sqlite3.connect(self.state/'mailbox.sqlite3') as conn:
             conn.execute('UPDATE sessions SET cli_session_id=? WHERE session_id=?',('new-codex-thread',self.logical[A]))
@@ -113,6 +115,39 @@ class IndependentReviewTests(EngineCase):
         error=self.attach(run,code=5)
         self.assertEqual(error['error']['code'],'FRESH_CONTEXT_REQUIRED')
         self.assertEqual(self.rows('SELECT count(*) AS n FROM messages')[0]['n'],0)
+
+    def test_consumption_survives_postcommit_failure_and_retry_without_files(self):
+        with patch.dict(os.environ,self.env|{'TEST_ACTOR':B}):
+            conn=db.connect()
+            try:
+                actor=sessions.actor(conn)
+                args=cli.parser().parse_args(['run','start','codex','--input-id',self.bundle['input_id'],
+                                             '--review-mode','independent','--operation-id','postcommit'])
+                with patch.object(service,'observe',side_effect=sqlite3.OperationalError('injected read failure')):
+                    with self.assertRaises(Error) as failure:service.start(conn,actor,args,None)
+                self.assertTrue(failure.exception.saved)
+                self.assertFalse(intake.requires_engine(actor))
+                (self.state/'inputs/captures'/(self.capture['capture_id']+'.json')).unlink()
+                with patch.object(intake,'_write',side_effect=OSError('filesystem unavailable')):
+                    repeated=service.start(conn,actor,args,None)
+                self.assertEqual(repeated['run_id'],failure.exception.run_id)
+                self.assertEqual(conn.execute('SELECT count(*) FROM discussion_runs').fetchone()[0],1)
+            finally:conn.close()
+        self.call('run','cancel',repeated['run_id'],'--operation-id','finish-fixture','--reason','fixture done',actor=B)
+        self.call('send','codex','ordinary request after terminal run',actor=B)
+
+    def test_rollback_does_not_consume_input(self):
+        with patch.dict(os.environ,self.env|{'TEST_ACTOR':B}):
+            conn=db.connect()
+            try:
+                actor=sessions.actor(conn)
+                args=cli.parser().parse_args(['run','start','codex','--input-id',self.bundle['input_id'],
+                                             '--review-mode','independent','--operation-id','rollback'])
+                with patch.object(service,'_record',side_effect=sqlite3.OperationalError('rollback')):
+                    with self.assertRaises(sqlite3.OperationalError):service.start(conn,actor,args,None)
+                self.assertEqual(conn.execute('SELECT count(*) FROM discussion_runs').fetchone()[0],0)
+                self.assertTrue(intake.requires_engine(actor))
+            finally:conn.close()
 
 
 if __name__=='__main__':

@@ -87,6 +87,8 @@ def independent_snapshot(bundle, mode, language=None):
     """Only captured human text and fixed neutral instructions enter the first analysis."""
     result = snapshot(bundle['raw_topic'], mode, rules='none', persona='none', language=language)
     result.update(review_mode='independent', input_id=bundle['input_id'],
+                  capture_id=bundle['capture_id'],
+                  request_capture_id=bundle['request_capture_id'],
                   input_sources=bundle['sources'], input_provenance=bundle['provenance'],
                   prompt_bundle_version=2)
     neutral = ('Analyze the captured user statements and the referenced working code independently. '

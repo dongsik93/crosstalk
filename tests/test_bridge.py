@@ -92,23 +92,30 @@ name = os.environ.get('TEST_PARENT_TERMINAL', 'other')
 if 'ppid=,tty=' in sys.argv:
     # TEST_INNER_TTY: the tool shell sits on a CLI-owned inner pty (agy), the CLI on the pane's TTY.
     inner = os.environ.get('TEST_INNER_TTY')
-    if sys.argv[-1] == '4242': print('1 ' + os.environ.get('TEST_TTY', 'ttys555'))
-    elif sys.argv[-1] == '4241': print('4242 ' + inner)  # second shell on the inner pty
-    else: print(('4241 ' + inner) if inner else '4242 ??')
+    if sys.argv[-1] == '900000042': print('1 ' + os.environ.get('TEST_TTY', 'ttys555'))
+    elif inner and sys.argv[-1] == '900000041': print('900000042 ' + inner)  # second shell on the inner pty
+    else: print(('900000041 ' + inner) if inner else '900000042 ??')
 elif 'lstart=' in sys.argv: print(os.environ.get('TEST_START', 'Mon Sep 7 22:58:00 2026'))
 elif 'pid=,pgid=,tpgid=,stat=,comm=' in sys.argv:
     name = os.environ.get('TEST_FOREGROUND_KIND', 'codex')
-    pid = os.environ.get('TEST_FOREGROUND_PID', '4242')
+    pid = os.environ.get('TEST_FOREGROUND_PID', '900000042')
     if name == 'node':
-        print('4141 4242 4242 S+ node')
+        print('4141 900000042 900000042 S+ node')
         name, pid = os.environ.get('TEST_CHILD_KIND', 'codex'), '4343'
-    group = '5555' if os.environ.get('TEST_BACKGROUND') else '4242'
-    print(pid + ' ' + group + ' 4242 S+ /usr/local/bin/' + name)
-    print('8888 7777 4242 S /usr/local/bin/codex')
-    print('4240 4242 4242 Ss+ /usr/bin/login')
+    group = '5555' if os.environ.get('TEST_BACKGROUND') else '900000042'
+    print(pid + ' ' + group + ' 900000042 S+ /usr/local/bin/' + name)
+    print('8888 7777 900000042 S /usr/local/bin/codex')
+    print('4240 900000042 900000042 Ss+ /usr/bin/login')
 else: print('1 /Applications/' + name + '.app/Contents/MacOS/' + name)
 ''')
     ps.chmod(0o755)
+    # Real helper PIDs must not collide with the synthetic parent chain.
+    no_inner = dict(os.environ)
+    no_inner.pop('TEST_INNER_TTY', None)
+    for candidate in ('4241', '900000041'):
+        probe = subprocess.run(['python3', str(ps), '-o', 'ppid=,tty=', '-p', candidate],
+                               env=no_inner, capture_output=True, text=True)
+        assert probe.returncode == 0 and probe.stdout.strip() == '900000042 ??', probe.stderr
     alive = root / 'alive.json'
     alive.write_text(json.dumps([A, B]))
     env = dict(os.environ, PATH=f'{root}:{os.environ["PATH"]}', TEST_LOG=str(log),
@@ -143,7 +150,7 @@ else: print('1 /Applications/' + name + '.app/Contents/MacOS/' + name)
     run('label', f'ghostty:{B}', 'claude')
     exact = json.loads(run('strict-identity'))
     assert exact['surface_id'] == f'ghostty:{A}' and exact['kind'] == 'codex'
-    assert exact['process_id'] == '4242' and exact['process_start']
+    assert exact['process_id'] == '900000042' and exact['process_start']
     assert json.loads(run('strict-identity', TEST_FOREGROUND_KIND='claude'))['kind'] == 'claude'
     assert json.loads(run('strict-identity', TEST_FOREGROUND_KIND='claude.exe'))['kind'] == 'claude'
     run('strict-identity', TEST_FOREGROUND_KIND='zsh', ok=False)
@@ -304,7 +311,7 @@ subprocess.run(['/bin/bash', '-c', ack], check=True)
         # Found exactly, cached, and the pane's original (non-ASCII) directory is restored.
         assert run('self', CROSSTALK_CONFIG_DIR=str(root / 'probe1'), **probe) == f'ghostty:{A}'
         assert last_osc_path() == '/work/한글 dir'
-        assert len(list((root / 'probe1/ghostty').glob('bind-4242.json'))) == 1
+        assert len(list((root / 'probe1/ghostty').glob('bind-900000042.json'))) == 1
         before = osc.read_bytes()
         assert run('self', CROSSTALK_CONFIG_DIR=str(root / 'probe1'), **probe) == f'ghostty:{A}'
         assert osc.read_bytes() == before  # cached: no second probe
@@ -354,7 +361,7 @@ subprocess.run(['/bin/bash', '-c', ack], check=True)
         assert osc.read_bytes() == prior
         # agy: the tool shell is on an inner pty, so probe and cache follow the CLI on the pane's TTY.
         assert run('self', CROSSTALK_CONFIG_DIR=str(root / 'probe3'), TEST_INNER_TTY='ttys900', **probe) == f'ghostty:{A}'
-        assert [p.name for p in (root / 'probe3/ghostty').glob('bind-*.json')] == ['bind-4242.json']
+        assert [p.name for p in (root / 'probe3/ghostty').glob('bind-*.json')] == ['bind-900000042.json']
         # No pane reports the probe: fail closed, but still restore (here to the caller's cwd).
         assert run('self', ok=False, CROSSTALK_CONFIG_DIR=str(root / 'probe2'), **(probe | {'TEST_PROBE_MATCH': '0'})) == ''
         assert last_osc_path() == os.getcwd()

@@ -394,9 +394,6 @@ def start(conn, actor, args, body):
             notifications=_advance_tx(conn,rid,allow_discovery=review_mode!='independent')
             result={'run_id':rid}
             _record(conn,actor,'start',args.operation_id,semantic,result)
-    if input_id:
-        with persisted(result['run_id']):
-            intake.mark_consumed(input_id,actor,result['run_id'])
     return _response(conn,actor,result,notifications)
 
 

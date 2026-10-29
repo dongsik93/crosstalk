@@ -3,7 +3,7 @@
 [English](README.md) | [한국어](README.ko.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.12.1--dev-blue)
+![Version](https://img.shields.io/badge/version-0.12.2--dev-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-black)
 
@@ -11,7 +11,7 @@ Ghostty에서 Claude와 Codex를 나란히 띄워 토의하거나, Antigravity(`
 
 ![Crosstalk hero](docs/hero.png)
 
-> v0.12.1은 Claude 호출자와 새 Codex 대화 사이의 독립 검토를 추가합니다. 자연어로 독립 검토를 요청하면 엔진 옵션 없이 보호 경로를 선택합니다. 일반 엔진 토론은 opt-in을 유지하며, 기존 mailbox-v2 thread의 의미는 바꾸지 않습니다. [독립 검토의 범위](docs/independent-review.md), [업그레이드](docs/upgrade-v0.12.md), [v0.12 검증 기록](docs/verification-v0.12.md)을 확인하세요. 전체 릴리스·실기 검증 완료를 뜻하지 않습니다.
+> v0.12.2은 Claude 호출자와 새 Codex 대화 사이의 독립 검토를 추가합니다. 자연어로 독립 검토를 요청하면 엔진 옵션 없이 보호 경로를 선택합니다. 일반 엔진 토론은 opt-in을 유지하며, 기존 mailbox-v2 thread의 의미는 바꾸지 않습니다. [독립 검토의 범위](docs/independent-review.md), [업그레이드](docs/upgrade-v0.12.md), [v0.12 검증 기록](docs/verification-v0.12.md)을 확인하세요. 전체 릴리스·실기 검증 완료를 뜻하지 않습니다.
 
 ## 소개
 
@@ -32,7 +32,7 @@ Crosstalk은 기존 대화형 AI CLI를 연결합니다. Codex에서는 `$crosst
 
 실제 점검 내용과 한계는 [Ghostty 검증 기록](docs/ghostty-verification.md)을 참고하세요. 이 소스에는 Ghostty 연동이 포함되어 있습니다. 마켓플레이스에서 예전 버전을 설치했다면 빠른 시작을 따라 하기 전에 업데이트해야 합니다.
 
-## 평소 대화에서 독립 검토하기 (v0.12.1)
+## 평소 대화에서 독립 검토하기 (v0.12.2)
 
 Claude와 평소처럼 이야기하다가 이렇게 말하면 됩니다.
 
