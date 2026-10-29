@@ -31,7 +31,7 @@ def saved_result(mid):
 
 def message(conn, mid, actor):
     valid_id(mid)
-    row = conn.execute('SELECT m.*,t.mode,t.state AS thread_state FROM messages m JOIN threads t USING(thread_id) WHERE id=?', (mid,)).fetchone()
+    row = conn.execute('SELECT m.*,t.mode,t.state AS thread_state,t.execution_owner FROM messages m JOIN threads t USING(thread_id) WHERE id=?', (mid,)).fetchone()
     require(row is not None and actor['session_id'] in (row['sender_session_id'],row['recipient_session_id']), 'NOT_FOUND', 'Message not found for this session')
     return row
 
@@ -83,15 +83,56 @@ def claim(conn, row, actor):
     return result
 
 
+
+def unmanaged(conn, row):
+    owner = conn.execute('SELECT execution_owner FROM threads WHERE thread_id=?', (row['thread_id'],)).fetchone()
+    require(owner and owner['execution_owner']=='mailbox-v2', 'RUN_MANAGED_BY_ENGINE', 'Use run take/submit/decide for this discussion message')
+
+
+def create_request(conn, actor, recipient, *, mid, body, summary='', mode='analyze', thread_id=None,
+                   round_no=1, caused_by=None, owner='mailbox-v2', run_id=None):
+    require(conn.in_transaction, 'STATE_CONFLICT', 'Mailbox mutations require the service transaction')
+    current_binding(conn,actor)
+    current_binding(conn,recipient)
+    if thread_id is None:
+        thread_id=mid
+        conn.execute('INSERT INTO threads(thread_id,caller_session_id,peer_session_id,mode,execution_owner,run_id) VALUES(?,?,?,?,?,?)',
+                     (thread_id,actor['session_id'],recipient['session_id'],mode,owner,run_id))
+    conn.execute("""INSERT INTO messages(id,thread_id,kind,sender_session_id,recipient_session_id,caused_by_reply_id,body,summary,round,created_at,run_id)
+                    VALUES(?,?,'request',?,?,?,?,?,?,?,?)""",
+                 (mid,thread_id,actor['session_id'],recipient['session_id'],caused_by,body,summary,round_no,now(),run_id))
+    delivery.seed(conn,mid)
+    db.event(conn,'saved',message_id=mid,session_id=actor['session_id'])
+    return mid
+
+
+def create_reply(conn, actor, original, *, body, summary='', verdict='none', reason='', confidence='unknown', token=None):
+    require(conn.in_transaction, 'STATE_CONFLICT', 'Mailbox mutations require the service transaction')
+    lease(conn,original,actor,token)
+    require(original['kind']=='request' and original['thread_state']=='open', 'STATE_CONFLICT', 'Request is not open')
+    mid=uuid.uuid4().hex
+    conn.execute("""INSERT INTO messages(id,thread_id,kind,sender_session_id,recipient_session_id,reply_to,body,summary,round,created_at,verdict,verdict_reason,confidence,verdict_source,run_id)
+                    VALUES(?,?,'reply',?,?,?,?,?,?,?,?,?,?,?,?)""",
+                 (mid,original['thread_id'],actor['session_id'],original['sender_session_id'],original['id'],body,summary,original['round'],now(),verdict,reason,confidence,'explicit' if verdict!='none' else 'none',original['run_id']))
+    delivery.seed(conn,mid,suppressed=original['mode']=='ask')
+    complete(conn,original,{'reply_id':mid})
+    db.event(conn,'reply_saved',message_id=mid,session_id=actor['session_id'])
+    return mid
+
+
 def send(conn, actor, args, body):
     mid=valid_id(args.id or uuid.uuid4().hex)
     recipient=sessions.peer(conn,args.peer,actor,session_id=args.peer_session)
     notify=False
     with db.transaction(conn):
+        if args.thread:
+            thread=conn.execute('SELECT execution_owner FROM threads WHERE thread_id=?',(args.thread,)).fetchone()
+            require(not thread or thread['execution_owner']=='mailbox-v2','RUN_MANAGED_BY_ENGINE','Use run decide for managed follow-ups')
         current_binding(conn,actor)
         current_binding(conn,recipient)
         existing=conn.execute('SELECT * FROM messages WHERE id=?',(mid,)).fetchone()
         if existing:
+            unmanaged(conn,existing)
             root=conn.execute('SELECT * FROM threads WHERE thread_id=?',(existing['thread_id'],)).fetchone()
             require((existing['sender_session_id'],existing['recipient_session_id'],existing['body'],root['mode'],existing['thread_id'],existing['kind'],existing['caused_by_reply_id']) ==
                     (actor['session_id'],recipient['session_id'],body,args.mode,args.thread or mid,'request',args.after_reply),
@@ -116,11 +157,7 @@ def send(conn, actor, args, body):
                 require(round_number<=thread['max_rounds'], 'STATE_CONFLICT','Conversation reached its round limit')
             else:
                 require(not args.after_reply and not args.lease_token, 'INVALID_ARGUMENT','--after-reply and --lease-token require --thread')
-                conn.execute('INSERT INTO threads(thread_id,caller_session_id,peer_session_id,mode) VALUES(?,?,?,?)',(mid,actor['session_id'],recipient['session_id'],args.mode))
-            conn.execute('''INSERT INTO messages(id,thread_id,kind,sender_session_id,recipient_session_id,caused_by_reply_id,body,summary,round,created_at)
-                         VALUES(?,?,'request',?,?,?,?,?,?,?)''',(mid,args.thread or mid,actor['session_id'],recipient['session_id'],args.after_reply,body,args.summary,round_number,now()))
-            delivery.seed(conn,mid)
-            db.event(conn,'saved',message_id=mid,session_id=actor['session_id'])
+            create_request(conn,actor,recipient,mid=mid,body=body,summary=args.summary,mode=args.mode,thread_id=args.thread,round_no=round_number,caused_by=args.after_reply)
             if args.thread: complete(conn,prior,{'next_request_id':mid})
             notify=True
     with saved_result(mid):
@@ -138,14 +175,21 @@ def output(conn, mid, actor):
 
 def receive(conn, actor, args):
     require(not args.replay, 'INVALID_ARGUMENT','--replay is deprecated; inspect recover ID and explicitly reclaim')
+    from .engine import service
     with db.transaction(conn):
         current_binding(conn,actor)
-        row=message(conn,args.id,actor) if args.id else conn.execute("SELECT m.*,t.mode,t.state AS thread_state FROM messages m JOIN threads t USING(thread_id) WHERE recipient_session_id=? AND processing_state='queued' AND t.state='open' ORDER BY seq LIMIT 1",(actor['session_id'],)).fetchone()
-        if row is None: return {'actionable':False,'reason':'empty'}
-        require(row['recipient_session_id']==actor['session_id'], 'STATE_CONFLICT','Only the recipient can receive this message')
-        if row['processing_state']!='queued': return {'id':row['id'],'actionable':False,'processing_state':row['processing_state'],'effective_state':effective_state(row)}
-        require(row['thread_state']=='open', 'STATE_CONFLICT','Thread is closed')
-        return claim(conn,row,actor)
+        rows=([message(conn,args.id,actor)] if args.id else conn.execute("SELECT m.*,t.mode,t.state AS thread_state,t.execution_owner FROM messages m JOIN threads t USING(thread_id) WHERE recipient_session_id=? AND processing_state='queued' AND t.state='open' ORDER BY seq",(actor['session_id'],)).fetchall())
+        for row in rows:
+            require(row['recipient_session_id']==actor['session_id'], 'STATE_CONFLICT','Only the recipient can receive this message')
+            if row['execution_owner']=='discussion-v1':
+                dispatched=service.dispatch_message(conn,row,actor)
+                if dispatched: return dispatched
+                if args.id: return {'id':row['id'],'actionable':False,'handler':'discussion','run_id':row['run_id'],'reason':'action_not_ready'}
+                continue
+            if row['processing_state']!='queued': return {'id':row['id'],'actionable':False,'processing_state':row['processing_state'],'effective_state':effective_state(row)}
+            require(row['thread_state']=='open', 'STATE_CONFLICT','Thread is closed')
+            return claim(conn,row,actor)
+        return {'actionable':False,'reason':'empty'}
 
 
 def reply(conn, actor, args, body):
@@ -154,6 +198,7 @@ def reply(conn, actor, args, body):
     notify=False
     with db.transaction(conn):
         original=message(conn,args.id,actor)
+        unmanaged(conn,original)
         require(original['kind']=='request' and original['recipient_session_id']==actor['session_id'], 'STATE_CONFLICT','Only the request recipient can reply')
         current_binding(conn,actor)
         existing=conn.execute('SELECT * FROM messages WHERE reply_to=?',(args.id,)).fetchone()
@@ -161,14 +206,7 @@ def reply(conn, actor, args, body):
             require((existing['body'],existing['verdict'],existing['verdict_reason'],existing['confidence']) == (body,args.verdict,args.reason,args.confidence), 'REPLY_CONFLICT','This request already has a different confirmed reply')
             mid=existing['id']
         else:
-            lease(conn,original,actor,args.lease_token)
-            require(original['thread_state']=='open', 'STATE_CONFLICT','Thread is closed')
-            mid=uuid.uuid4().hex
-            conn.execute('''INSERT INTO messages(id,thread_id,kind,sender_session_id,recipient_session_id,reply_to,body,summary,round,created_at,verdict,verdict_reason,confidence,verdict_source)
-                         VALUES(?,?,'reply',?,?,?,?,?,?,?,?,?,?,?)''',(mid,original['thread_id'],actor['session_id'],original['sender_session_id'],original['id'],body,args.summary,original['round'],now(),args.verdict,args.reason,args.confidence,'explicit' if args.verdict!='none' else 'none'))
-            delivery.seed(conn,mid,suppressed=original['mode']=='ask')
-            complete(conn,original,{'reply_id':mid})
-            db.event(conn,'reply_saved',message_id=mid,session_id=actor['session_id'])
+            mid=create_reply(conn,actor,original,body=body,summary=args.summary,verdict=args.verdict,reason=args.reason,confidence=args.confidence,token=args.lease_token)
             notify=True
     with saved_result(mid):
         result=output(conn,mid,actor)
@@ -180,6 +218,7 @@ def ack(conn, actor, args, result):
     payload={'outcome':args.outcome,'result':result}
     with db.transaction(conn):
         row=message(conn,args.id,actor)
+        unmanaged(conn,row)
         require(row['kind']=='reply' and row['recipient_session_id']==actor['session_id'], 'STATE_CONFLICT','Only a reply recipient can ack')
         require(args.outcome in OUTCOMES and (args.outcome=='observed')==(row['mode']=='ask'), 'INVALID_ARGUMENT','Ask uses observed; analyze uses concluded, diverged, or unresolved')
         current_binding(conn,actor)
@@ -208,7 +247,7 @@ def renew(conn, actor, args):
 def recover(conn, actor, args):
     if not args.reclaim:
         row=message(conn,args.id,actor)
-        return {'message':envelope(row,body=False),'reclaimable':effective_state(row)=='recovery_required',
+        return {'message':public_envelope(conn,row,actor,body=False),'reclaimable':effective_state(row)=='recovery_required',
                 'warning':'Prior processing may have changed external files. Inspect history and external effects before reclaiming.',
                 'next_action':f'recover {row["id"]} --reclaim --expected-claim-version {row["claim_version"]} --confirm-external-effects'}
     require(args.confirm_external_effects, 'INVALID_ARGUMENT','Explicit confirmation of external effects is required')
@@ -219,6 +258,9 @@ def recover(conn, actor, args):
         require(row['claim_version']==args.expected_claim_version, 'STALE_LEASE','Claim changed since inspection')
         require(effective_state(row)=='recovery_required', 'STATE_CONFLICT','Only expired or recovery-required work may be reclaimed')
         require(row['thread_state']=='open', 'STATE_CONFLICT','Thread is closed')
+        if row['run_id']:
+            from .engine.service import recovery_allowed
+            recovery_allowed(conn,row,actor)
         if row['attempt_count']>=MAX_ATTEMPTS:
             conn.execute("UPDATE messages SET processing_state='failed',lease_token_hash=NULL,lease_expires_at=NULL,last_error_code='ATTEMPT_LIMIT' WHERE id=?",(row['id'],))
             db.event(conn,'failed',message_id=row['id'],error_code='ATTEMPT_LIMIT')
@@ -230,6 +272,7 @@ def cancel(conn, actor, args):
     require(args.reason.strip(), 'INVALID_ARGUMENT','Cancellation requires a reason')
     with db.transaction(conn):
         row=message(conn,args.id,actor)
+        unmanaged(conn,row)
         require(row['sender_session_id']==actor['session_id'], 'STATE_CONFLICT','Only the message sender can cancel')
         current_binding(conn,actor)
         require(row['processing_state'] in ('queued','processing','recovery_required','cancelled'), 'STATE_CONFLICT','Completed or failed messages cannot be cancelled')
@@ -244,7 +287,7 @@ def query(conn, actor, args):
         rows=conn.execute('SELECT * FROM messages WHERE thread_id=? ORDER BY seq LIMIT ? OFFSET ?',(row['thread_id'],args.limit,args.offset)).fetchall()
         result=[]
         for row in rows:
-            item=envelope(row)
+            item=public_envelope(conn,row,actor)
             item['delivery_attempts']=[delivery.attempt_view(attempt) for attempt in conn.execute(
                 'SELECT * FROM delivery_attempts WHERE message_id=? ORDER BY rowid', (row['id'],))]
             result.append(item)
@@ -254,7 +297,18 @@ def query(conn, actor, args):
         (actor['session_id'],actor['session_id'],args.limit,args.offset)).fetchall())
     result=[]
     for row in rows:
-        item=envelope(row,body=False)
+        item=public_envelope(conn,row,actor,body=False)
         item['latest_delivery']=delivery.attempt_view(delivery.latest(conn,row['id']))
         result.append(item)
     return result
+
+
+def public_envelope(conn,row,actor,*,body=True):
+    value=envelope(row,body=body)
+    if row['run_id']:
+        from .engine.service import hidden_reply
+        if hidden_reply(conn,row,actor):
+            for key in ('body','summary','completion_result','verdict','verdict_reason','confidence','verdict_source'):
+                value.pop(key,None)
+            value['redacted']=True
+    return value

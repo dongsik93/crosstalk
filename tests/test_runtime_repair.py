@@ -192,8 +192,16 @@ installer.install(SOURCE, HOME)
         self.assertEqual(self.config.read_bytes(), self.config_bytes)
 
     def _assert_reported_import_error_blocks_activation(self, prefix):
-        module = self.source / 'assets/scripts/crosstalk_lib/mailbox.py'
-        module.write_bytes(prefix + module.read_bytes())
+        # Engine dispatch imports mailbox earlier now; fail inside doctor's DB inspection
+        # so this still proves an exit-zero JSON failure cannot authorize activation.
+        module = self.source / 'assets/scripts/crosstalk_lib/db.py'
+        injected = ('\n_original_connect = connect\n'
+                    'def connect(*args, **kwargs):\n'
+                    '    import sys\n'
+                    '    if len(sys.argv) > 1 and sys.argv[1] == "doctor":\n' +
+                    ''.join('        ' + line + '\n' for line in prefix.decode().splitlines()) +
+                    '    return _original_connect(*args, **kwargs)\n')
+        module.write_bytes(module.read_bytes() + injected.encode())
         run = subprocess.run([sys.executable, str(REPO / 'assets/scripts/crosstalk'),
                               'install', '--source', str(self.source), '--home', str(self.home)],
                              capture_output=True, text=True, timeout=30, cwd='/')

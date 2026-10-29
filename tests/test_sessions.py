@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Session ownership tests with exact, isolated fake terminal identities."""
 import argparse
+import json
 import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -87,7 +88,8 @@ class SessionsTest(unittest.TestCase):
         parser=argparse.ArgumentParser()
         sessions.add_parser(parser.add_subparsers(dest='command'))
         args=parser.parse_args(['session','challenge','--surface',B,'--kind','claude','--session-id',bound['session_id'],'--expected-generation','1','--notify'])
-        with patch.object(sessions,'bridge') as mocked:
+        identity = json.dumps({'surface_id':B,'kind':'claude','process_id':'fixture','process_start':'test'})
+        with patch.object(sessions,'bridge',side_effect=lambda command,*_: identity if command=='target-identity' else '') as mocked:
             sessions.run(args)
         prompt=mocked.call_args.args[2]
         self.assertIn('crosstalk_bridge.sh bind '+B,prompt)
@@ -96,7 +98,38 @@ class SessionsTest(unittest.TestCase):
         self.assertIn('mailbox_instructions',prompt)
         self.assertNotIn('--confirm-transfer',prompt)
         args.confirm_transfer=True
-        with patch.object(sessions,'bridge') as mocked:sessions.run(args)
+        with patch.object(sessions,'bridge',side_effect=lambda command,*_: identity if command=='target-identity' else '') as mocked:sessions.run(args)
         self.assertIn('--confirm-transfer',mocked.call_args.args[2])
+
+    def test_binding_notification_refuses_shell_before_creating_challenge(self):
+        parser=argparse.ArgumentParser()
+        sessions.add_parser(parser.add_subparsers(dest='command'))
+        args=parser.parse_args(['session','challenge','--surface',B,'--kind','claude','--notify'])
+        shell=json.dumps({'surface_id':B,'kind':'unknown','process_id':'shell','process_start':'test'})
+        with patch.object(sessions,'bridge',return_value=shell) as bridge, self.assertRaises(Error):
+            sessions.run(args)
+        self.assertEqual([call.args[0] for call in bridge.call_args_list],['target-identity'])
+        self.assertEqual(self.conn.execute('SELECT count(*) FROM challenges').fetchone()[0],0)
+
+    def test_engine_readiness_requires_matching_explicit_handshake(self):
+        nonce=sessions.challenge(self.conn,A,'claude',protocol=3,engine_version=1)
+        with patch.object(sessions,'identity',return_value={'surface_id':A,'kind':'claude','process_id':A,'process_start':'test'}):
+            with self.assertRaises(Error):
+                sessions.bind(self.conn,nonce['challenge'],'claude')
+            with self.assertRaises(Error):
+                sessions.bind(self.conn,nonce['challenge'],'claude',protocol=3)
+            bound=sessions.bind(self.conn,nonce['challenge'],'claude',protocol=3,engine_version=1)
+            actor=sessions.actor(self.conn)
+        self.assertEqual((bound['protocol_version'],bound['engine_version']), (3,1))
+        self.assertEqual((actor['protocol_version'],actor['engine_version']), (3,1))
+        legacy=self.bind(B,'codex')
+        self.assertEqual((legacy['protocol_version'],legacy['engine_version']), (2,0))
+
+    def test_invalid_readiness_does_not_create_session_or_challenge(self):
+        for protocol,engine in ((2,1),(3,0),(4,1),(3,2)):
+            with self.subTest(protocol=protocol,engine=engine),self.assertRaises(Error):
+                sessions.challenge(self.conn,A,'claude',protocol=protocol,engine_version=engine)
+        self.assertEqual(self.conn.execute('SELECT count(*) FROM challenges').fetchone()[0],0)
+        self.assertEqual(self.conn.execute('SELECT count(*) FROM sessions').fetchone()[0],0)
 
 if __name__=='__main__':unittest.main()

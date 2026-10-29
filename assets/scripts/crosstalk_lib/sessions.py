@@ -63,7 +63,8 @@ def peer(conn, kind, caller, session_id=None):
     return dict(rows[0])
 
 
-def challenge(conn, address, kind, *, session_id=None, expected_generation=0):
+def challenge(conn, address, kind, *, session_id=None, expected_generation=0, protocol=2, engine_version=0):
+    require((protocol, engine_version) in ((2,0),(3,1)), "PROTOCOL_MISMATCH", "Use protocol 3 and engine version 1 for discussion readiness")
     require(SURFACE.fullmatch(address), 'INVALID_ARGUMENT', 'Use an exact Ghostty surface ID')
     require(kind in KINDS, 'INVALID_ARGUMENT', 'Unknown CLI kind')
     require(isinstance(expected_generation,int) and expected_generation>=0, 'INVALID_ARGUMENT', 'Expected generation must be nonnegative')
@@ -79,14 +80,14 @@ def challenge(conn, address, kind, *, session_id=None, expected_generation=0):
             require(expected_generation==0, 'INVALID_ARGUMENT', 'New sessions start at generation zero')
             session_id = uuid.uuid4().hex
             conn.execute('INSERT INTO sessions(session_id,kind,status,created_at) VALUES(?,?,?,?)', (session_id,kind,'unresolved',now()))
-        conn.execute('INSERT INTO challenges(nonce_hash,session_id,surface_id,kind,protocol,expected_generation,expires_at) VALUES(?,?,?,?,?,?,?)',
-                     (hashlib.sha256(nonce.encode()).hexdigest(),session_id,address,kind,2,expected_generation,expires))
+        conn.execute('INSERT INTO challenges(nonce_hash,session_id,surface_id,kind,protocol,expected_generation,expires_at,engine_version) VALUES(?,?,?,?,?,?,?,?)',
+                     (hashlib.sha256(nonce.encode()).hexdigest(),session_id,address,kind,protocol,expected_generation,expires,engine_version))
         db.event(conn,'binding_challenge_created',session_id=session_id,generation=expected_generation)
-    return {'challenge':nonce,'session_id':session_id,'surface_id':address,'expected_generation':expected_generation,'expires_at':expires,'protocol_version':2}
+    return {'challenge':nonce,'session_id':session_id,'surface_id':address,'expected_generation':expected_generation,'expires_at':expires,'protocol_version':protocol,'engine_version':engine_version}
 
 
-def bind(conn, nonce, kind, *, protocol=2, cli_session_id=None, confirm_transfer=False):
-    require(protocol==2, 'PROTOCOL_MISMATCH', 'Reload protocol 2 instructions before binding')
+def bind(conn, nonce, kind, *, protocol=2, engine_version=0, cli_session_id=None, confirm_transfer=False):
+    require((protocol, engine_version) in ((2,0),(3,1)), "PROTOCOL_MISMATCH", "Reload the matching protocol and engine instructions before binding")
     require(kind in KINDS, 'INVALID_ARGUMENT', 'Unknown CLI kind')
     current = identity()
     address = current['surface_id']
@@ -98,7 +99,7 @@ def bind(conn, nonce, kind, *, protocol=2, cli_session_id=None, confirm_transfer
     with db.lock('session-' + valid_id(sid)[:48]), db.transaction(conn):
         request = conn.execute('SELECT * FROM challenges WHERE nonce_hash=?', (digest,)).fetchone()
         require(not request['used'] and request['expires_at']>time.time(), 'BINDING_CONFLICT', 'Challenge is expired or already used')
-        require(request['surface_id']==address and request['kind']==kind and request['protocol']==protocol,
+        require(request['surface_id']==address and request['kind']==kind and request['protocol']==protocol and request['engine_version']==engine_version,
                 'BINDING_CONFLICT', 'Challenge belongs to a different pane, kind, or protocol')
         previous = conn.execute('SELECT * FROM bindings WHERE session_id=? ORDER BY generation DESC LIMIT 1',(sid,)).fetchone()
         generation = previous['generation'] if previous else 0
@@ -114,13 +115,13 @@ def bind(conn, nonce, kind, *, protocol=2, cli_session_id=None, confirm_transfer
                 'BINDING_CONFLICT', 'CLI identity changed without explicit transfer')
         instance, timestamp = uuid.uuid4().hex, now()
         conn.execute('UPDATE bindings SET active=0 WHERE session_id=?',(sid,))
-        conn.execute('INSERT INTO bindings(session_id,instance_id,backend,surface_id,generation,evidence,bound_at,last_seen_at,active) VALUES(?,?,?,?,?,?,?,?,1)',
-                     (sid,instance,'ghostty',address,generation+1,json.dumps({key: current.get(key) for key in ('process_id','process_start')}),timestamp,timestamp))
+        conn.execute('INSERT INTO bindings(session_id,instance_id,backend,surface_id,generation,evidence,bound_at,last_seen_at,active,protocol_version,engine_version) VALUES(?,?,?,?,?,?,?,?,1,?,?)',
+                     (sid,instance,'ghostty',address,generation+1,json.dumps({key: current.get(key) for key in ('process_id','process_start')}),timestamp,timestamp,protocol,engine_version))
         conn.execute("UPDATE sessions SET kind=?,cli_session_id=?,status='ready' WHERE session_id=?", (kind,cli_session_id,sid))
         conn.execute('UPDATE challenges SET used=1 WHERE nonce_hash=?',(digest,))
         conn.execute("UPDATE messages SET processing_state='recovery_required',lease_token_hash=NULL,last_error_code='STALE_BINDING' WHERE recipient_session_id=? AND processing_state='processing'",(sid,))
         db.event(conn,'session_bound',session_id=sid,generation=generation+1)
-    return {'session_id':sid,'instance_id':instance,'surface_id':address,'binding_generation':generation+1,'generation':generation+1,'protocol_version':2,'ready':True}
+    return {'session_id':sid,'instance_id':instance,'surface_id':address,'binding_generation':generation+1,'generation':generation+1,'protocol_version':protocol,'engine_version':engine_version,'ready':True}
 
 
 def add_parser(subparsers):
@@ -132,12 +133,15 @@ def add_parser(subparsers):
     issue.add_argument('--session-id')
     issue.add_argument('--expected-generation',type=int,default=0)
     issue.add_argument('--notify',action='store_true')
+    issue.add_argument('--protocol',type=int,default=2)
+    issue.add_argument('--engine-version',type=int,default=0)
     issue.add_argument('--confirm-transfer',action='store_true',help='Include the user-authorized transfer in the target binding prompt')
     for action in ('bind','rebind'):
         answer = actions.add_parser(action)
         answer.add_argument('--challenge',required=True)
         answer.add_argument('--kind',choices=KINDS,required=True)
         answer.add_argument('--protocol',type=int,required=True)
+        answer.add_argument('--engine-version',type=int,default=0)
         answer.add_argument('--cli-session-id')
         answer.add_argument('--confirm-transfer',action='store_true')
     actions.add_parser('status')
@@ -148,7 +152,16 @@ def run(args):
         if args.session_command=='status':
             return [dict(row) for row in conn.execute(BINDING + 'WHERE b.active=1 ORDER BY b.session_id')]
         if args.session_command=='challenge':
-            result = challenge(conn,args.surface,args.kind,session_id=args.session_id,expected_generation=args.expected_generation)
+            if args.notify:
+                try:
+                    target = json.loads(bridge('target-identity', args.surface))
+                except (ValueError, TypeError):
+                    raise Error('BINDING_CONFLICT', 'Target did not provide a verifiable CLI identity') from None
+                require(isinstance(target, dict) and target.get('surface_id') == args.surface
+                        and target.get('kind') == args.kind and target.get('process_id')
+                        and target.get('process_start'), 'BINDING_CONFLICT',
+                        'Selected pane is not the expected running CLI; no binding prompt was sent')
+            result = challenge(conn,args.surface,args.kind,session_id=args.session_id,expected_generation=args.expected_generation,protocol=args.protocol,engine_version=args.engine_version)
             if args.notify:
                 # Nonce is deliberately sent only to the exact selected pane; never to logs/events.
                 scripts = Path(__file__).resolve().parents[1]
@@ -157,8 +170,8 @@ def run(args):
                 environment = ['env',f'CROSSTALK_CONFIG_DIR={db.root()}',f'CROSSTALK_SURFACE_ID={args.surface}']
                 location = shlex.join([*environment,bridge_path,'bind',args.surface])
                 capabilities = shlex.join([*environment,runtime,'capabilities','--json'])
-                command = [*environment,runtime,'session','bind','--challenge',result['challenge'],'--kind',args.kind,'--protocol','2']
+                command = [*environment,runtime,'session','bind','--challenge',result['challenge'],'--kind',args.kind,'--protocol',str(args.protocol),'--engine-version',str(args.engine_version)]
                 if args.confirm_transfer: command.append('--confirm-transfer')
                 bridge('send',args.surface, f'[Crosstalk] In this CLI, run {location}, then {capabilities}; read mailbox_instructions from that result, then run {shlex.join(command)}. Retain this explicitly selected CROSSTALK_SURFACE_ID for commands in this pane; on resume, select the current pane again rather than inheriting an old address. Do not start a discussion until ready=true.')
             return result
-        return bind(conn,args.challenge,args.kind,protocol=args.protocol,cli_session_id=args.cli_session_id,confirm_transfer=args.confirm_transfer)
+        return bind(conn,args.challenge,args.kind,protocol=args.protocol,engine_version=args.engine_version,cli_session_id=args.cli_session_id,confirm_transfer=args.confirm_transfer)

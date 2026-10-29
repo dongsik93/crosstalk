@@ -16,6 +16,13 @@ SPEC.loader.exec_module(installer)
 
 
 class InstallTests(unittest.TestCase):
+    def test_release_inventory_covers_all_runtime_modules_and_templates(self):
+        package = Path(__file__).resolve().parents[1] / 'assets/scripts/crosstalk_lib'
+        modules = {str(path.relative_to(package).with_suffix('')) for path in package.rglob('*.py')}
+        self.assertEqual(set(installer.RUNTIME_MODULES), modules)
+        templates = {path.name for path in (package / 'engine/templates').glob('*.md')}
+        self.assertEqual(set(installer.RUNTIME_TEMPLATES), templates)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -29,26 +36,28 @@ class InstallTests(unittest.TestCase):
         self.env.start()
         self.addCleanup(self.env.stop)
         contents = {
-            'VERSION': '0.11.0\n',
+            'VERSION': '0.12.0\n',
             'assets/scripts/crosstalk': '''#!/usr/bin/env python3
 import json, os, pathlib, sqlite3, sys
 root=pathlib.Path(os.environ['CROSSTALK_CONFIG_DIR'])
 if sys.argv[1]=='migrate':
     with sqlite3.connect(root/'mailbox.sqlite3') as db:
         db.execute('CREATE TABLE IF NOT EXISTS messages(processing_state TEXT)')
-        db.execute('PRAGMA user_version=2')
+        db.execute('PRAGMA user_version=3')
     print(json.dumps({'backup_path':str(root/'migration.backup')}))
 elif sys.argv[1]=='capabilities':
-    print(json.dumps({'protocol_version':2,'runtime_version':'0.11.0','schema_version':2}))
+    print(json.dumps({'protocol_version':3,'runtime_version':'0.12.0','schema_version':3,'engine_version':1}))
 else:
     print(json.dumps({'runtime_healthy':True}))
 ''',
             'assets/scripts/crosstalk_bridge.sh': '#!/bin/bash\necho bridge\n',
             'assets/scripts/crosstalk_ghostty.sh': '#!/bin/bash\ntrue\n',
+            'assets/scripts/crosstalk_terminal.sh': '#!/bin/bash\ntrue\n',
             'assets/scripts/crosstalk_lib/__init__.py': '',
             'assets/scripts/crosstalk_lib/cli.py': '# fixture CLI above\n',
             'assets/codex-skills/crosstalk/SKILL.md': 'protocol 2 skill',
-            'assets/codex-skills/crosstalk/mailbox.md': 'protocol 2 mailbox',
+            'assets/codex-skills/crosstalk/mailbox.md': 'legacy mailbox',
+            'assets/codex-skills/crosstalk/discussion.md': 'protocol 3 discussion',
             'assets/user-commands/crosstalk.md': 'new command',
             'assets/agy-commands/crosstalk-peer.toml': 'prompt="new"',
             'assets/rules/en/default.md': 'new rule',
@@ -56,6 +65,8 @@ else:
         }
         for name in installer.RUNTIME_MODULES:
             contents.setdefault(f'assets/scripts/crosstalk_lib/{name}.py', '# fixture runtime module\n')
+        for name in installer.RUNTIME_TEMPLATES:
+            contents[f'assets/scripts/crosstalk_lib/engine/templates/{name}'] = 'fixture task template'
         for rel, body in contents.items():
             path = self.source / rel
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -72,7 +83,7 @@ else:
         executable = self.home / '.local/bin/crosstalk'
         run = subprocess.run([str(executable), 'capabilities', '--json'], cwd='/', capture_output=True, text=True)
         self.assertEqual(run.returncode, 0, run.stderr)
-        self.assertEqual(json.loads(run.stdout)['protocol_version'], 2)
+        self.assertEqual(json.loads(run.stdout)['protocol_version'], 3)
         self.assertEqual(json.loads((self.root / 'config.json').read_text())['language'], 'ko')
         self.assertEqual((self.root / 'mailbox.sqlite3').stat().st_mode & 0o077, 0)
 
@@ -315,7 +326,7 @@ else:
         self.assertTrue(Path(manifest['migration_backup']).is_file())
         self.assertFalse((self.root / 'current').exists())
         with sqlite3.connect(database) as conn:
-            self.assertEqual(conn.execute('PRAGMA user_version').fetchone()[0], 2)
+            self.assertEqual(conn.execute('PRAGMA user_version').fetchone()[0], 3)
             self.assertEqual(conn.execute('SELECT body FROM messages').fetchone()[0], 'keep me')
         result = installer.install(repo, self.home)
         self.assertEqual(result['migration_backup'], manifest['migration_backup'])
@@ -343,7 +354,7 @@ else:
         self.assertEqual(caps.returncode, 0, caps.stdout + caps.stderr)
         data = json.loads(caps.stdout)
         self.assertEqual(data['installation_health']['status'], 'healthy')
-        self.assertEqual(data['schema_version'], 2)
+        self.assertEqual(data['schema_version'], 3)
         self.assertTrue(Path(data['mailbox_instructions']).is_file())
         doctor = subprocess.run([str(executable), 'doctor', '--offline'], cwd='/', env=env,
                                 capture_output=True, text=True, timeout=30)
@@ -425,6 +436,27 @@ else:
         with self.assertRaisesRegex(ValueError, 'Incomplete'):
             self.install()
         self.assertFalse((self.root / installer.MANIFEST).exists())
+
+    def test_missing_engine_assets_preserve_existing_installation(self):
+        self.install()
+        before_manifest = (self.root / installer.MANIFEST).read_bytes()
+        before_database = (self.root / 'mailbox.sqlite3').read_bytes()
+        before_pointer = os.readlink(self.root / 'current')
+        paths = ['assets/codex-skills/crosstalk/discussion.md', 'assets/scripts/crosstalk_terminal.sh']
+        paths += [f'assets/scripts/crosstalk_lib/engine/templates/{name}' for name in installer.RUNTIME_TEMPLATES]
+        for rel in paths:
+            with self.subTest(path=rel):
+                source = self.source / rel
+                original = source.read_bytes()
+                source.unlink()
+                try:
+                    with self.assertRaisesRegex(ValueError, 'Incomplete release'):
+                        self.install()
+                    self.assertEqual((self.root / installer.MANIFEST).read_bytes(), before_manifest)
+                    self.assertEqual((self.root / 'mailbox.sqlite3').read_bytes(), before_database)
+                    self.assertEqual(os.readlink(self.root / 'current'), before_pointer)
+                finally:
+                    source.write_bytes(original)
 
 
 if __name__ == '__main__':

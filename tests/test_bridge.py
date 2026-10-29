@@ -26,10 +26,13 @@ with open(os.environ['TEST_LOG'], 'a') as out:
     out.write(json.dumps(['mailbox', *args, os.environ['CROSSTALK_CONFIG_DIR']]) + '\\n')
 if args[:2] == ['session', 'challenge']:
     assert args[args.index('--surface') + 1] == os.environ['CROSSTALK_SURFACE_ID']
+    assert args[args.index('--protocol') + 1] == '3'
+    assert args[args.index('--engine-version') + 1] == '1'
     print(json.dumps({'challenge': 'startup-test-nonce'}))
 elif args[:2] == ['session', 'bind']:
     assert args[args.index('--challenge') + 1] == 'startup-test-nonce'
-    assert args[args.index('--protocol') + 1] == '2'
+    assert args[args.index('--protocol') + 1] == '3'
+    assert args[args.index('--engine-version') + 1] == '1'
     if os.environ.get('TEST_BIND_FAIL') == '1': sys.exit(1)
     print(json.dumps({'bound': True}))
 else:
@@ -66,7 +69,7 @@ elif op == 'split':
     if os.environ.get('TEST_LAUNCH') == '1':
         child_env = dict(os.environ, PATH=args[4] if len(args)>4 else '/usr/bin:/bin')
         subprocess.Popen(['/bin/bash', '--noprofile', '--norc', '-c', args[3]], env=child_env,
-                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                         stdin=subprocess.DEVNULL, stdout=open(os.environ['TEST_LOG'] + '.launch', 'a'), stderr=subprocess.STDOUT)
     print(alive[-1])
 ''')
     fake.chmod(0o755)
@@ -116,7 +119,7 @@ else: print('1 /Applications/' + name + '.app/Contents/MacOS/' + name)
     def run(*args, ok=True, **extra):
         result = subprocess.run(['bash', str(BRIDGE), *args], env=env | extra,
                                 capture_output=True, text=True, timeout=20)
-        assert (result.returncode == 0) == ok, (args, result.stdout, result.stderr)
+        assert (result.returncode == 0) == ok, (args, result.stdout, result.stderr, Path(str(log)+'.launch').read_text() if Path(str(log)+'.launch').exists() else '')
         return result.stdout.strip()
 
     def events():
@@ -240,7 +243,7 @@ else:
     assert sys.argv[1:-1] == ([flag] if os.environ.get('TEST_AUTO_APPROVE')=='1' else [])
 prompt = sys.argv[-1]
 assert len(prompt) < 90 and 'session bind' not in prompt and 'CROSSTALK_' not in prompt
-startup = Path(re.fullmatch(r'Crosstalk startup check[.] Read (/tmp/ct-startup[.][A-Za-z0-9]+)[.]', prompt).group(1))
+startup = Path(re.fullmatch(r'Crosstalk startup check[.] Read (/tmp/ct-startup[.][A-Za-z0-9_]+)[.]', prompt).group(1))
 assert startup.stat().st_mode & 0o777 == 0o600
 instructions = startup.read_text()
 assert '__SID__' not in instructions and os.environ['CROSSTALK_SURFACE_ID'] in instructions
@@ -255,7 +258,7 @@ subprocess.run(['/bin/bash', '-c', ack], check=True)
         assert run('launch', kind, TEST_LAUNCH='1', READY_MAX_WAIT='10', TMPDIR=str(scratch), TEST_LAUNCH_RESULT=str(result)) == f'ghostty:{B}'
         data = json.loads(result.read_text())
         assert data['id'] == f'ghostty:{B}' and 'Crosstalk startup check' in data['prompt']
-        assert 'session challenge' in data['instructions'] and '--protocol 2' in data['instructions']
+        assert 'session challenge' in data['instructions'] and '--protocol 3 --engine-version 1' in data['instructions']
         assert not Path(data['startup']).exists()
         bound = [e for e in events() if e[:3] == ['mailbox', 'session', 'bind']][-1]
         assert bound[-1] == env['CROSSTALK_CONFIG_DIR']

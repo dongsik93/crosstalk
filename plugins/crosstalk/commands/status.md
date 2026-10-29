@@ -8,9 +8,9 @@ argument-hint: (인자 없음)
 
 읽기 전용. 현재 Crosstalk 셋업을 한눈에 보여준다.
 
-## Protocol 2 진단
+## Protocol 3 / engine 1 진단
 
-먼저 `~/.claude/scripts/crosstalk capabilities --json`과 `doctor --offline`을 실행한다. DB가 없거나 migration이 필요하면 그대로 진단하며 생성·변환하지 않는다. Ghostty에서는 `status`로 메시지 상태와 effective recovery_required, 별도 알림 상태를 확인한다. pagination으로 나머지 항목도 확인한 뒤 미처리 항목이 없다고 판단한다. runtime/protocol/schema, 설치 불완전, unresolved session을 표시한다. 기본 조회는 launch/bind/receive/ack/retry/recover나 프리셋 복사를 하지 않는다.
+먼저 `~/.claude/scripts/crosstalk capabilities --json`과 `doctor --offline`을 실행한다. DB가 없거나 migration이 필요하면 그대로 진단하며 생성·변환하지 않는다. Ghostty에서는 `status`로 메시지 상태와 effective recovery_required, 별도 알림 상태를 확인한다. pagination으로 나머지 항목도 확인한 뒤 미처리 항목이 없다고 판단한다. runtime/protocol/schema/engine, 설치 불완전, unresolved session을 표시한다. 저장된 engine run은 `run status <RUN_ID>`와 `run next <RUN_ID>`로 phase/round/blocker를 보여주며 명시적 결과 조회는 `run report <RUN_ID>`를 쓴다. 조회로 take/advance를 호출하지 않고 초기 공개 장벽을 우회하지 않는다. 기본 조회는 launch/bind/receive/ack/retry/recover나 프리셋 복사를 하지 않는다.
 
 ## 1단계: 정보 수집
 

@@ -5,13 +5,13 @@
   },
   "metadata": {
     "description": "Claude and Codex discussions with Claude, Codex, or Antigravity peers in Ghostty using a SQLite mailbox; legacy cmux workflows remain available.",
-    "version": "0.11.0"
+    "version": "0.12.0"
   },
   "plugins": [
     {
       "name": "crosstalk",
       "description": "Claude and Codex discussions with Claude, Codex, or Antigravity peers in Ghostty using a SQLite mailbox; legacy cmux workflows remain available.",
-      "version": "0.11.0",
+      "version": "0.12.0",
       "author": {
         "name": "dongsik93"
       },

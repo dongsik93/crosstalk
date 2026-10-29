@@ -90,7 +90,7 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(self.path.stat().st_mode & 0o077, 0)
         self.assertEqual(self.state.stat().st_mode & 0o077, 0)
         before = self.dump()
-        self.assertEqual(migrations.migrate(), {'schema_version': 2, 'migrated': False})
+        self.assertEqual(migrations.migrate(), {'schema_version': 3, 'migrated': False})
         self.assertEqual(before, self.dump())
         self.assertFalse((self.state/'backups').exists())
         with closing(db.connect(readonly=True)) as conn:
@@ -103,7 +103,7 @@ class MigrationTests(unittest.TestCase):
         self.path.chmod(0o600)
         self.assertTrue(migrations.migrate()['created'])
         with closing(db.connect(readonly=True)) as conn:
-            self.assertEqual(conn.execute('PRAGMA user_version').fetchone()[0], 2)
+            self.assertEqual(conn.execute('PRAGMA user_version').fetchone()[0], 3)
 
     def test_database_with_unrecognized_tables_is_not_adopted(self):
         with connection(self.path) as conn:
@@ -151,7 +151,7 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(conn.execute('SELECT COUNT(*) FROM bindings').fetchone()[0], 0)
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM sessions WHERE status='unresolved'").fetchone()[0], 2)
             self.assertFalse(conn.execute('PRAGMA foreign_key_check').fetchall())
-            self.assertEqual(conn.execute('PRAGMA user_version').fetchone()[0], 2)
+            self.assertEqual(conn.execute('PRAGMA user_version').fetchone()[0], 3)
             self.assertEqual(conn.execute("SELECT state FROM delivery_attempts WHERE message_id='reply-a'").fetchone()[0], 'suppressed')
         after = self.dump()
         self.assertFalse(migrations.migrate()['migrated'])
@@ -201,7 +201,7 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(conn.execute('SELECT COUNT(*) FROM messages').fetchone()[0], 6)
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM events WHERE event_type='migrated'").fetchone()[0], 1)
 
-    def test_process_death_after_commit_leaves_complete_v2(self):
+    def test_process_death_after_commit_leaves_complete_v3(self):
         self.legacy()
         child = self.process('from crosstalk_lib import migrations; import os; migrations.migrate(); os._exit(98)')
         out, err = child.communicate(timeout=20)

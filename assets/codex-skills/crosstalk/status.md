@@ -1,6 +1,6 @@
 # $crosstalk status
 
-Read-only inspection; do not launch, label, bind, receive, retry, reclaim, create a DB, or copy presets.
+Read-only inspection. Do not launch, label, bind, receive, retry, reclaim, create a DB, copy presets or advance a run to display status.
 
 ```bash
 ~/.claude/scripts/crosstalk capabilities --json
@@ -8,8 +8,8 @@ Read-only inspection; do not launch, label, bind, receive, retry, reclaim, creat
 ~/.claude/scripts/crosstalk status
 ```
 
-If the terminal can be identified, `crosstalk_bridge.sh list-all` may list candidates. A label is not a protocol-2 binding. Show runtime/protocol/schema, installation health, unresolved sessions, queued/processing/completed and effective recovery_required states, and separate delivery status. Missing DB is a diagnosis, not a request to create it. Use pagination before claiming there are no other pending or interrupted messages.
+For a known discussion run, use `run status <RUN_ID>`, `run next <RUN_ID>` or explicit `run report <RUN_ID>`. These do not claim messages or submit input. Show lifecycle, phase, round, exact participant roles, actionable blocker and a concrete next step. Keep submission/receipt/completion separate; no peer body or conclusion summary is exposed before the caller initial-position barrier. Ask results are sampled individual answers, not consensus.
 
-Read config, rules/personas and their names under `CROSSTALK_CONFIG_DIR` (default `~/.claude/crosstalk`) without changing them. Show one concrete next action for each blocking diagnosis. Status never authorizes recover or an automatic permission change.
+Capabilities reports runtime/protocol/schema/engine versions and actual instruction paths. Session status distinguishes a compatible ordinary protocol-2 binding from protocol-3/engine-1 readiness. Every Codex tool call requires its exact current surface/config context as described in readiness.md. A label or same CLI thread cache is not readiness.
 
-Start commands: Claude `/crosstalk <topic>`; Codex `$crosstalk <topic>`.
+Use pagination for ordinary mailbox status/history. Missing DB or partial installation is a diagnosis, not authorization to initialize or repair it. The user may separately request notification retry, message recover, run continue, or installation repair; status does none of them automatically.

@@ -1,6 +1,20 @@
 # Changelog
 
-## 0.11.0 — unreleased
+## 0.12.0 — unreleased
+
+Discussion engine 1 is explicit opt-in (`run start`, or analyze/ask `--engine`) while live gates remain pending. Runtime protocol and database schema move to 3; existing mailbox-v2 threads retain their owner and behavior. The source baseline is v0.11 commit `0d8a24e692bfde2ee3ee61fe84731050b85b0c0f`.
+
+- Store run/round/action progression, immutable inputs/results and operation-id retry results beside the existing mailbox.
+- Compose peer reply, comparison ack, next request and engine transitions in the same SQLite transaction; reuse existing leases, recovery and binding fencing.
+- Withhold the first peer body/conclusion through normal APIs until the caller submits its own initial analysis; this is disclosure order, not a security sandbox or truth guarantee.
+- Preserve caller comparison provenance and distinguish concluded, diverged, unresolved, round_limit and partial results. Finalization/export reuse saved decisions without another model call.
+- Keep ask as single-result sampling: no comparison, follow-up, caller reply wake-up or synthetic acknowledgement of unread informational results.
+- Separate built-in CLI launch specifications from exact terminal operations, preserving short startup, native splits, pending-pane reuse and explicit per-launch permission choices.
+- Add owner-aware dispatch and guards, protocol-3/engine-1 readiness, explicit schema migration, recursive package/template inventory and ordinary-thread continuation.
+
+Not added: daemon workers, direct model API, new AI/terminal backends, agy caller, multi-peer quorum, model/effort control, Ghostty cowork/review, forced consensus, or lossless down-migration. See [v0.12 verification](docs/verification-v0.12.md); configured tests and historical live results are not release acceptance.
+
+## 0.11.0 — baseline implementation
 
 Reliability implementation for mailbox protocol 2 / schema 2. Release readiness remains subject to the automated and actual-terminal checks in [verification](docs/verification-v0.11.md).
 

@@ -3,7 +3,7 @@
 [English](README.md) | [한국어](README.ko.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.10.6-blue)
+![Version](https://img.shields.io/badge/version-0.12.0--dev-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-black)
 
@@ -11,7 +11,7 @@ Ghostty에서 Claude와 Codex를 나란히 띄워 토의하거나, Antigravity(`
 
 ![Crosstalk hero](docs/hero.png)
 
-> v0.11.0 구현은 아직 미출시입니다. Protocol 2/schema 2는 명시적인 업그레이드와 CLI 지시문 새로 읽기가 필요합니다. [검증 기록](docs/verification-v0.11.md)의 현재 실기 상태를 확인하세요. 이전 v0.10 점검은 이 프로토콜의 검증이 아닙니다.
+> v0.12.0은 검증 중입니다. Protocol 3/schema 3에 discussion engine 1을 명시적 opt-in으로 추가하며, 기존 mailbox-v2 thread는 의미를 유지합니다. [업그레이드](docs/upgrade-v0.12.md)와 [검증 기록](docs/verification-v0.12.md)을 확인하세요. 과거 실기 결과나 CI 설정만으로 새 엔진의 완료를 주장하지 않습니다.
 
 ## 소개
 
@@ -21,14 +21,36 @@ Crosstalk은 기존 대화형 AI CLI를 연결합니다. Codex에서는 `$crosst
 
 | 기능 | macOS의 Ghostty | cmux |
 | --- | --- | --- |
-| Claude ↔ Codex 분석 및 콜백 | Protocol 2 구현, 실기 검증 대기 | 지원, Codex 호출자는 실험 단계 |
+| Claude ↔ Codex 일반 메시지함 | mailbox-v2 호환 경로 유지 | 레거시 지원, Codex 호출자는 실험 단계 |
+| Discussion engine 1 (`--engine`) | caller 1명·peer 1명, 명시적 opt-in; v0.12 실기 검증 대기 | 미지원; 기존 RUN_ID 흐름 유지 |
 | 빠른 의견 수집 (`ask`) | 지원 | 지원 |
 | 상대 pane 준비 | 같은 탭에서 자체 분할 또는 재사용 | `:launch`로 워크스페이스 분할 |
-| Antigravity (`agy`) 참여 | Protocol 2 메시지함, 실기 검증 대기 | 지원 |
+| Antigravity (`agy`) 참여 | 일반 호환 경로 유지; engine peer는 protocol 3/engine 1 준비와 실기 검증 필요 | 레거시 지원 |
 | 공동작업 및 PR 리뷰 | 아직 미이식 | 사용 가능, 심층 리뷰는 실험 단계 |
-| 화면 캡처 / 화면 기반 전달 | Ghostty 1.3 AppleScript API에서 제공하지 않음 | 사용 가능 |
+| 화면 캡처 / 화면 기반 전달 | 현재 어댑터 미지원; 엔진 필수 조건 아님 | 레거시 지원 |
 
 실제 점검 내용과 한계는 [Ghostty 검증 기록](docs/ghostty-verification.md)을 참고하세요. 이 소스에는 Ghostty 연동이 포함되어 있습니다. 마켓플레이스에서 예전 버전을 설치했다면 빠른 시작을 따라 하기 전에 업데이트해야 합니다.
+
+## 토론 엔진 opt-in (v0.12)
+
+엔진은 현재 run·round·action·고정 입력과 종료 이유를 저장합니다. 분석과 비교 판단은 AI가, 진행 절차와 원자적 상태 변경은 코드가 담당합니다. 실기 게이트를 통과하기 전에는 명시적으로 선택합니다.
+
+```text
+# Claude
+/crosstalk:analyze --engine <주제>
+/crosstalk:ask --engine <질문>
+# Codex
+$crosstalk analyze --engine <주제>
+$crosstalk ask --engine <질문>
+```
+
+양쪽에 protocol-3/engine-1 준비가 필요합니다. `capabilities --json`의 `discussion_instructions`가 알려주는 [공통 workflow](assets/codex-skills/crosstalk/discussion.md)를 따릅니다. `run start` 자체가 저수준 opt-in이며, `engine_default=false`인 동안 옵션 없는 새 요청은 일반 메시지함 경로를 유지합니다. 기존 thread/run의 실행 소유자를 조용히 바꾸지 않습니다.
+
+caller가 첫 분석을 저장하기 전에는 Crosstalk API가 peer의 첫 답변을 공개하지 않습니다. 이는 공개 순서에 대한 보장이며 옆 pane이나 기존 문맥의 영향을 격리하는 보장은 아닙니다. 비교 결정은 해당 round의 고정 결과를 참조하며, peer의 agree만으로 합의나 정답을 인증하지 않습니다. 결과는 호출자의 비교 결론·이견 유지·정보 부족·라운드 상한 종료를 구분합니다.
+
+Ask는 각 답변을 저장하고 sampled로 끝납니다. compare·추가 round·caller reply wake-up·읽었다는 가짜 ack가 없습니다. 요청받았을 때 `run report`로 저장 결과를 봅니다. `run continue`는 workflow/local action 인계, `recover`는 승인된 message lease 재점유, `retry`는 같은 알림 재전송입니다.
+
+상주 데몬·직접 모델 API·모델/effort 변경·agy caller·혼합 터미널 run·다중 peer quorum·Ghostty cowork/review 이식은 추가하지 않습니다. [엔진 계약](docs/discussion-engine-v1.md), [어댑터](docs/adapter-contracts.md), [업그레이드](docs/upgrade-v0.12.md), [검증](docs/verification-v0.12.md)을 참고하세요. 시작 문구는 짧게 유지하며 상세 handshake는 비공개 임시 파일에 둡니다.
 
 ## 주요 기능
 
@@ -37,7 +59,7 @@ Crosstalk은 기존 대화형 AI CLI를 연결합니다. Codex에서는 `$crosst
 - **상대 AI 자동 준비**: 같은 탭에 라벨이 지정된 상대 pane이 없으면 현재 디렉터리에서 다른 CLI를 실행합니다. 시작 확인을 받은 뒤 작업을 보냅니다.
 - **독립적인 답변**: 각 AI에게 사용자의 원래 주제를 전달합니다.
 - **영속 메시지함**: Ghostty의 요청과 답변을 SQLite에 저장합니다. `send`, `receive`, `reply`가 ID, 수신 상태, 답변 알림을 관리하므로 AI가 메시지별 MD 파일이나 ping 명령을 다룰 필요가 없습니다.
-- **명시적인 판정**: protocol-2 답변은 명시적인 verdict/confidence 필드를 쓰고, 기존 cmux 표식은 JSON으로 안전하게 파싱합니다.
+- **명시적인 결과**: 일반 답변은 verdict/confidence를 유지하며, opt-in 엔진은 고정 입력 참조와 구조화된 비교 결정을 추가합니다. 기존 cmux 표식은 JSON으로 안전하게 파싱합니다.
 - **빠른 의견 수집**: `ask`는 콜백이나 결과 취합 없이 각 AI의 pane에서 답변합니다.
 - **cmux 고급 작업**: git worktree 공동작업, PR 리뷰, Antigravity 참여는 cmux에서 계속 사용할 수 있습니다.
 
@@ -46,7 +68,7 @@ Crosstalk은 기존 대화형 AI CLI를 연결합니다. Codex에서는 `$crosst
 | 도구 | 용도 | 참고 |
 | --- | --- | --- |
 | macOS | 두 터미널 백엔드 모두 | 터미널 앱이 지원하는 OS 버전 사용 |
-| Ghostty 1.3+ | 자체 Claude ↔ Codex 토의 | macOS AppleScript 지원, cmux나 tmux 불필요 |
+| 필요한 AppleScript 동작을 제공하는 Ghostty | 자체 Claude ↔ Codex 토의 | 정확한 주소·입력 capability 확인; 실제 버전은 검증 기록 참고 |
 | Claude Code 또는 Codex CLI | 토의 호출자 | 토의를 시작하려면 둘 중 하나 이상 필요 |
 | Claude, Codex 또는 Antigravity (`agy`) | 참여자 | 선택한 호출자와 참여자 CLI를 설치하고 인증 |
 | jq | 브리지 및 설정 | 필수 |
@@ -194,17 +216,17 @@ crosstalk send agy "Review this approach" --summary "Reviewing the proposed appr
 
 Claude에서는 `ensure-peer claude agy`를 사용합니다. `agy`와 `antigravity`는 같은 참여자를 가리킵니다. 런처는 `agy --prompt-interactive`로 실행하고 호출자의 PATH를 전달합니다. agy에도 앞서 설명한 공통 권한 선택을 적용합니다. 로그인·프로젝트 선택·도구 승인 창이 뜨면 해당 pane에서 완료하세요. 시간이 초과돼도 새 pane을 만들지 말고 기존 pane을 사용하세요.
 
-새 agy pane은 시작할 때 protocol-2 handshake를 완료합니다. 기존 pane도 setup을 마치고 capabilities가 알려주는 `mailbox_instructions`를 읽어야 합니다. 같은 receive/lease/reply 규약을 쓰며 `/crosstalk-peer ... RUN_ID=...`는 기존 cmux 처리기로 유지합니다. 호출자는 Claude/Codex입니다. 실제 protocol-2 agy 연동은 아직 미검증입니다.
+새 agy pane은 protocol-3/engine-1 준비 절차를 수행합니다. 기존 pane은 지시문 reload와 명시적 handshake가 필요합니다. `receive`의 managed dispatch는 공통 `discussion_instructions`, 일반 mailbox-v2는 `mailbox_instructions`를 따릅니다. `/crosstalk-peer ... RUN_ID=...`는 레거시 처리기로 유지합니다. 새 엔진에서 agy는 peer만 지원하고 caller는 Claude/Codex입니다. v0.12 실기 검증은 아직 대기 중입니다.
 
 ### 식별 및 복구
 
-Protocol 2는 논리 소유권과 물리 pane을 분리합니다. Claude/agy는 정확한 TTY probe를 사용할 수 있지만 Codex CLI 세션 ID만으로 pane 주소가 증명되지는 않습니다. `bridge strict-self`는 라벨/cwd fallback을 거부합니다. 사용자가 선택한 대상은 `/crosstalk:setup --surface ghostty:<UUID>`로 준비하고 각 CLI가 자신의 일회용 challenge/bind를 실행해야 합니다. 준비 완료는 `session status`로 확인하며 라벨만으로 판단하지 않습니다.
+세션 바인딩은 논리 소유권과 물리 pane을 분리합니다. 새 engine에는 protocol 3/engine 1 준비가 필요하며, 기존 protocol-2 바인딩만으로 이를 인정하지 않습니다. Claude/agy는 정확한 TTY probe를 사용할 수 있지만 Codex CLI 세션 ID만으로 pane 주소가 증명되지는 않습니다. `bridge strict-self`는 라벨/cwd fallback을 거부합니다. 사용자가 선택한 대상은 `/crosstalk:setup --surface ghostty:<UUID>`로 준비하고 각 CLI가 자신의 일회용 challenge/bind를 실행해야 합니다. 준비 완료는 `session status`로 확인하며 라벨만으로 판단하지 않습니다.
 
 다른 pane에서 CLI를 resume했다면 의도한 논리 세션에 명시적으로 rebind하고 새 binding generation을 받아야 합니다. 이전 pane이 닫혔다고 작업이 자동 이전되지는 않습니다. 이전 pane이 살아 있거나 repository 문맥이 바뀌었다면 인계를 확인합니다. History를 읽고 중단 claim은 승인된 recover로 재개합니다. 포커스·제목·종류·cwd로 추측하지 않습니다.
 
-Codex는 매 protocol-2 호출에 정확한 현재 `CROSSTALK_SURFACE_ID`와 공유 `CROSSTALK_CONFIG_DIR`를 명시해야 합니다. 이전 pane이 살아 있어도 thread cache만으로 resume 후 주소를 증명할 수 없습니다. restart/resume 후 현재 target을 다시 선택하고 handshake하세요. 이전 대화에서 기억한 주소를 복사하지 마세요. 호출 형식은 [protocol 2](docs/protocol-v2.md)를 참고하세요.
+Codex는 매 Ghostty protocol 호출에 정확한 현재 `CROSSTALK_SURFACE_ID`와 공유 `CROSSTALK_CONFIG_DIR`를 명시해야 합니다. 이전 pane이 살아 있어도 thread cache만으로 resume 후 주소를 증명할 수 없습니다. restart/resume 후 현재 target을 다시 선택하고 handshake하세요. 이전 대화에서 기억한 주소를 복사하지 마세요. 현재 호출과 handshake 형식은 [readiness](assets/codex-skills/crosstalk/readiness.md)를 참고하세요.
 
-시작 timeout이면 기존 pending pane을 재사용하고 실제 관찰한 로그인/신뢰 확인을 처리합니다. 중복 pane을 열거나 권한을 우회하지 않습니다. unknown pane의 라벨은 후보 정보이며 protocol-2 handshake가 여전히 필요합니다. Ghostty의 화면 캡처/푸터 기반 준비 확인은 제공하지 않습니다. Cowork와 review는 cmux 전용입니다.
+시작 timeout이면 기존 pending pane을 재사용하고 실제 관찰한 로그인/신뢰 확인을 처리합니다. 중복 pane을 열거나 권한을 우회하지 않습니다. unknown pane의 라벨은 후보 정보이며 검증된 protocol/engine handshake가 여전히 필요합니다. Ghostty의 화면 캡처/푸터 기반 준비 확인은 제공하지 않습니다. Cowork와 review는 cmux 전용입니다.
 
 정확한 후보 주소는 다음 명령으로 확인합니다.
 
@@ -215,7 +237,7 @@ crosstalk doctor --offline
 crosstalk session status
 ```
 
-긴 본문은 SQLite에 남고 알림 제출·수신·처리 완료를 구분합니다. 자동 테스트는 격리된 가짜 터미널을 사용하며, 실제 protocol-2 검증은 [검증 기록](docs/verification-v0.11.md)에 따로 기록합니다.
+긴 본문은 SQLite에 남고 알림 제출·수신·처리 완료를 구분합니다. 자동 테스트는 격리된 가짜 터미널을 사용하며, v0.12 engine의 실제 검증은 [검증 기록](docs/verification-v0.12.md)에 따로 남깁니다.
 
 ## 데모
 
@@ -267,9 +289,9 @@ crosstalk session status
 | `/crosstalk:review [PR]` | cmux 작업: 진행자가 `gh pr diff`로 PR 리뷰를 이끕니다. |
 | `/crosstalk:review --deep [PR]` | cmux 작업: commit을 고정한 detached worktree와 안전한 정리를 사용합니다. |
 
-## 동작 방식: Ghostty 메시지함 protocol 2
+## 동작 방식: 일반 mailbox-v2 호환 경로
 
-먼저 setup으로 호출자와 참여자의 handshake를 완료합니다. `crosstalk capabilities --json`이 protocol/schema와 실제 메시지함 지시문 경로를 알려줍니다. 라벨만으로 소유권을 정하지 않습니다. `send`는 검증된 논리 세션을 선택하며 종류가 같은 후보가 여러 개라면 `--peer-session`을 명시합니다. 실행 파일이 PATH에 없으면 `~/.claude/scripts/crosstalk`을 사용하세요.
+이 절은 일반 thread용이며 discussion-v1 managed 메시지에는 적용하지 않습니다. setup으로 호출자와 참여자의 handshake를 완료합니다. `crosstalk capabilities --json`이 protocol/schema와 실제 메시지함 지시문 경로를 알려줍니다. 라벨만으로 소유권을 정하지 않습니다. `send`는 검증된 논리 세션을 선택하며 종류가 같은 후보가 여러 개라면 `--peer-session`을 명시합니다. 실행 파일이 PATH에 없으면 `~/.claude/scripts/crosstalk`을 사용하세요.
 
 ```sh
 crosstalk capabilities --json
@@ -391,14 +413,14 @@ PR 리뷰는 `/crosstalk:review <PR>`로 실행합니다. Deep review는 base/he
 - **기존 파일 방식에는 `bridge ping` 필요**: 완료는 이벤트 기반입니다. 상대가 ping하지 않으면 진행자는 대기합니다. 어느 pane에서든 `bridge ping <RUN_ID> <agent> <round>`를 직접 실행해 대기를 풀 수 있습니다.
 - **AI가 전달 지침을 무시할 수 있음**: cmux에서 선택하는 `--transport file/screen` 모드는 이를 프로토콜 오류로 처리하고 재시도/건너뛰기/중단 선택지를 제공합니다.
 - **심층 PR 리뷰는 실기 검증 필요**: detached worktree는 Git 메타데이터를 공유하며 보안 샌드박스가 아닙니다. 위험한 정리는 거부합니다.
-- **콜백은 CLI 입력 처리에 의존**: Protocol-2 실기 검증은 아직 완료되지 않았으며, CLI가 작업 중이거나 권한 확인창이 열려 있으면 입력 처리가 지연되거나 막힐 수 있습니다. 상대가 작업을 시작했다고 판단하기 전에 메시지함 수신 상태를 확인하세요. 기존 ping은 앞서 보낸 각 트리거의 수신을 확인하지 않습니다.
+- **콜백은 CLI 입력 처리에 의존**: v0.12 engine 실기 검증은 아직 완료되지 않았으며, CLI가 작업 중이거나 권한 확인창이 열려 있으면 입력 처리가 지연되거나 막힐 수 있습니다. 상대가 작업을 시작했다고 판단하기 전에 메시지함 수신 상태를 확인하세요. 기존 ping은 앞서 보낸 각 트리거의 수신을 확인하지 않습니다.
 - **Antigravity 호출자 미지원**: Antigravity (`agy`)는 참여자로만 사용할 수 있습니다. Claude나 Codex에서 시작해야 합니다.
 
 ## 향후 계획
 
 - Ghostty에 고급 cowork/review 작업 지원
 - 참여 AI별 모델과 effort 선택
-- 전달 진단 개선; 자동 작업 재실행은 v0.11 보장 범위가 아님
+- 전달 진단 개선; 자동 작업 재실행은 보장 범위가 아님
 - Antigravity 진행자 모드
 - 추가 CLI 어댑터
 - tmux 및 zellij 지원

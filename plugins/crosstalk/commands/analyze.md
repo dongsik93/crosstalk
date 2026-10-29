@@ -1,14 +1,14 @@
 ---
-description: Independent multi-agent analysis with conditional ping-pong. No moderator. Each peer analyzes the same raw input, results are compared, and disagreements trigger respect-based ping-pong until consensus or respectful divergence.
+description: Analyze through explicit Ghostty engine opt-in or ordinary mailbox ownership; retain legacy cmux discussion flows.
 allowed-tools: Bash, AskUserQuestion
-argument-hint: <분석 주제 / 자료 본문>
+argument-hint: [--engine] <분석 주제 / 자료 본문>
 ---
 
 # /crosstalk:analyze (사회자 없는 독립 분석 + 조건부 핑퐁)
 
-Incoming `[Crosstalk] 질문:/답변:/Question:/Reply:` previews: run `~/.claude/scripts/crosstalk capabilities --json`, require protocol 2 and healthy installation, and read its returned mailbox instruction path and call ID-less `receive`. Do not answer the preview directly or infer an ID from it. Process the actual DB row, then check for the next pending message.
+For Ghostty, first check `crosstalk capabilities --json` and exact readiness. New `--engine` requests explicitly opt into the discussion engine; read its returned `discussion_instructions` (canonical `discussion.md`) and stop before the legacy steps below. Without that opt-in, ordinary mailbox-v2 work follows `mailbox_instructions`. Incoming previews call `receive`; `handler=discussion` routes to `run take/submit/decide` using the canonical workflow, never to a fresh start or raw managed reply/ack. Existing explicit RUN_ID triggers and cmux alone use the legacy steps below. Runtime protocol is 3; new engine participants require protocol 3 and engine 1 readiness.
 
-For a new Ghostty request (bridge `backend` returns `ghostty`) or an incoming `[crosstalk] mailbox <ID>`, run `~/.claude/scripts/crosstalk capabilities --json`, require protocol 2 and healthy installation, and read its returned mailbox instruction path and use that lease/reply/ack workflow instead of the legacy steps below. Existing RUN_ID triggers and cmux runs still follow the legacy steps.
+## Legacy cmux / explicit RUN_ID only
 
 ## 컨셉
 

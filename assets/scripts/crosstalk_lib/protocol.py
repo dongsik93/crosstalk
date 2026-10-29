@@ -20,12 +20,16 @@ class Error(ValueError):
         if self.code in ('INVALID_ARGUMENT', 'INVALID_ID'): return 2
         if self.code in ('CALLER_UNBOUND', 'AMBIGUOUS_PEER', 'BINDING_CONFLICT'): return 3
         if self.code in ('MIGRATION_REQUIRED', 'SCHEMA_TOO_NEW', 'PROTOCOL_MISMATCH'): return 6
-        if self.code in ('LEASE_EXPIRED', 'STALE_LEASE', 'STALE_BINDING', 'IDEMPOTENCY_CONFLICT', 'REPLY_CONFLICT', 'STATE_CONFLICT'): return 5
+        if self.code in ('LEASE_EXPIRED', 'STALE_LEASE', 'STALE_BINDING', 'IDEMPOTENCY_CONFLICT', 'REPLY_CONFLICT', 'STATE_CONFLICT','RUN_ALREADY_ACTIVE','RUN_MANAGED_BY_ENGINE','INITIAL_POSITION_REQUIRED','ACTION_NOT_READY','STALE_ACTION','RESULT_CONFLICT','INPUT_DIGEST_MISMATCH','DECISION_INVALID','RUN_PAUSED','RUN_TERMINAL'): return 5
         return 7
 
     def result(self):
-        return {'error': {'code': self.code, 'message': str(self), 'retryable': self.code in ('DB_BUSY', 'TERMINAL_TIMEOUT')},
-                'saved': self.saved, 'message_id': self.message_id, 'next_action': self.next_action}
+        value = {'error': {'code': self.code, 'message': str(self), 'retryable': self.code in ('DB_BUSY', 'TERMINAL_TIMEOUT')},
+                 'saved': self.saved, 'message_id': self.message_id, 'next_action': self.next_action}
+        if getattr(self,'engine',False):
+            value.update(protocol_version=3,ok=False,run_id=getattr(self,'run_id',None),action_id=getattr(self,'action_id',None),
+                         lifecycle=None,phase=None,round=None)
+        return value
 
 
 def require(value, code, message):

@@ -19,6 +19,8 @@ CREATE TABLE bindings (
  backend TEXT NOT NULL CHECK(backend IN ('ghostty','cmux')), surface_id TEXT NOT NULL,
  generation INTEGER NOT NULL CHECK(generation>0), evidence TEXT NOT NULL, bound_at TEXT NOT NULL,
  last_seen_at TEXT NOT NULL, active INTEGER NOT NULL CHECK(active IN (0,1)),
+ protocol_version INTEGER NOT NULL DEFAULT 2 CHECK(protocol_version IN (2,3)),
+ engine_version INTEGER NOT NULL DEFAULT 0 CHECK(engine_version IN (0,1)),
  PRIMARY KEY(session_id,generation)
 );
 CREATE UNIQUE INDEX binding_session ON bindings(session_id) WHERE active=1;
@@ -26,13 +28,16 @@ CREATE UNIQUE INDEX binding_surface ON bindings(backend,surface_id) WHERE active
 CREATE TABLE challenges (
  nonce_hash TEXT PRIMARY KEY, session_id TEXT REFERENCES sessions(session_id), surface_id TEXT NOT NULL,
  kind TEXT NOT NULL, protocol INTEGER NOT NULL, expected_generation INTEGER NOT NULL,
- expires_at REAL NOT NULL, used INTEGER NOT NULL DEFAULT 0 CHECK(used IN (0,1))
+ expires_at REAL NOT NULL, used INTEGER NOT NULL DEFAULT 0 CHECK(used IN (0,1)),
+ engine_version INTEGER NOT NULL DEFAULT 0 CHECK(engine_version IN (0,1))
 );
 CREATE TABLE threads (
  thread_id TEXT PRIMARY KEY, caller_session_id TEXT NOT NULL REFERENCES sessions(session_id),
  peer_session_id TEXT NOT NULL REFERENCES sessions(session_id), mode TEXT NOT NULL CHECK(mode IN ('ask','analyze')),
  max_rounds INTEGER NOT NULL DEFAULT 10 CHECK(max_rounds BETWEEN 1 AND 10),
- state TEXT NOT NULL DEFAULT 'open' CHECK(state IN ('open','closed'))
+ state TEXT NOT NULL DEFAULT 'open' CHECK(state IN ('open','closed')),
+ execution_owner TEXT NOT NULL DEFAULT 'mailbox-v2' CHECK(execution_owner IN ('mailbox-v2','discussion-v1')),
+ run_id TEXT UNIQUE REFERENCES discussion_runs(run_id)
 );
 CREATE TABLE messages (
  seq INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, thread_id TEXT NOT NULL REFERENCES threads(thread_id),
@@ -47,6 +52,7 @@ CREATE TABLE messages (
  verdict TEXT NOT NULL DEFAULT 'none' CHECK(verdict IN ('agree','disagree','respect_disagree','none')),
  verdict_reason TEXT NOT NULL DEFAULT '', confidence TEXT NOT NULL DEFAULT 'unknown' CHECK(confidence IN ('high','medium','low','unknown')),
  verdict_source TEXT NOT NULL DEFAULT 'none' CHECK(verdict_source IN ('explicit','legacy_marker','none')),
+ run_id TEXT REFERENCES discussion_runs(run_id), action_id TEXT REFERENCES discussion_actions(action_id),
  CHECK((kind='request' AND reply_to IS NULL) OR (kind='reply' AND reply_to IS NOT NULL))
 );
 CREATE UNIQUE INDEX request_round ON messages(thread_id,round) WHERE kind='request';
@@ -65,6 +71,9 @@ CREATE TABLE review_runs (
  worktree_path TEXT, owner_nonce TEXT, state TEXT, artifact_path TEXT, last_error TEXT
 );
 '''
+
+from .engine.store import SCHEMA as ENGINE_SCHEMA
+SCHEMA += ENGINE_SCHEMA
 
 
 def root():
@@ -87,16 +96,25 @@ def secure_path(path, *, directory=False, create=False):
 def schema_version(conn):
     version = conn.execute('PRAGMA user_version').fetchone()[0]
     columns = {row[1] for row in conn.execute('PRAGMA table_info(messages)')}
-    if version > 2: raise Error('SCHEMA_TOO_NEW', 'Database schema is newer than this runtime')
+    if version > 3: raise Error('SCHEMA_TOO_NEW', 'Database schema is newer than this runtime')
     if not columns:
         require(not conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").fetchall(), 'UNSUPPORTED_SCHEMA', 'Database contains unknown tables')
         return 0
     if 'sender' in columns: return 1
-    require(version == 2 and {'seq','sender_session_id','processing_state','lease_token_hash'} <= columns,
+    require(version in (2,3) and {'seq','sender_session_id','processing_state','lease_token_hash'} <= columns,
             'UNSUPPORTED_SCHEMA', 'Unrecognized database structure')
     for table in ('sessions','bindings','threads','challenges','delivery_attempts','events','review_runs'):
         require(conn.execute('SELECT 1 FROM sqlite_master WHERE type=? AND name=?', ('table',table)).fetchone(), 'UNSUPPORTED_SCHEMA', f'Missing table: {table}')
-    return 2
+    if version == 3:
+        required = {'threads': {'execution_owner','run_id'}, 'messages': {'run_id','action_id'},
+                    'bindings': {'protocol_version','engine_version'}, 'challenges': {'engine_version'}}
+        for table, fields in required.items():
+            require(fields <= {row[1] for row in conn.execute(f'PRAGMA table_info({table})')},
+                    'UNSUPPORTED_SCHEMA', f'Missing protocol 3 columns: {table}')
+        for table in ('discussion_runs','discussion_rounds','discussion_actions','discussion_operations'):
+            require(conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",(table,)).fetchone(),
+                    'UNSUPPORTED_SCHEMA', f'Missing engine table: {table}')
+    return version
 
 
 def connect(*, readonly=False, initialize=False):
@@ -116,11 +134,11 @@ def connect(*, readonly=False, initialize=False):
     conn.execute('PRAGMA foreign_keys=ON')
     version = schema_version(conn)
     if version == 0 and initialize:
-        conn.executescript('BEGIN IMMEDIATE;\n' + SCHEMA + '\nPRAGMA user_version=2; COMMIT;')
+        conn.executescript('BEGIN IMMEDIATE;\n' + SCHEMA + '\nPRAGMA user_version=3; COMMIT;')
         os.chmod(path, 0o600)
-    elif version != 2:
+    elif version != 3:
         conn.close()
-        raise Error('MIGRATION_REQUIRED', 'Run migrate explicitly before using protocol 2')
+        raise Error('MIGRATION_REQUIRED', 'Run migrate explicitly before using protocol 3')
     return conn
 
 

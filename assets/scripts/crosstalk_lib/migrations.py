@@ -14,6 +14,52 @@ def _execute_schema(conn):
         if statement.strip(): conn.execute(statement)
 
 
+def _backup(path, version):
+    backup_dir = db.secure_path(path.parent / 'backups', directory=True, create=True)
+    backup_path = backup_dir / (f'mailbox-v{version}-' + uuid.uuid4().hex + '.sqlite3')
+    fd = os.open(backup_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    os.close(fd)
+    with closing(sqlite3.connect(path, timeout=10)) as reader, closing(sqlite3.connect(backup_path)) as backup:
+        reader.backup(backup)
+        require(backup.execute('PRAGMA integrity_check').fetchone()[0] == 'ok',
+                'BACKUP_FAILED', 'Backup integrity check failed')
+    return backup_path
+
+
+def _upgrade_v2(conn, path):
+    require(conn.execute('PRAGMA integrity_check').fetchone()[0] == 'ok', 'DB_CORRUPT', 'Mailbox integrity check failed')
+    with db.transaction(conn):
+        backup_path = _backup(path, 2)
+        original = {}
+        for table in ('sessions','bindings','challenges','threads','messages','delivery_attempts','events','review_runs'):
+            columns = [row[1] for row in conn.execute(f'PRAGMA table_info({table})')]
+            original[table] = (columns, [tuple(row) for row in conn.execute(f'SELECT * FROM {table} ORDER BY rowid')])
+        for statement in db.ENGINE_SCHEMA.split(';'):
+            if statement.strip(): conn.execute(statement)
+        additions = {
+            'threads': ["execution_owner TEXT NOT NULL DEFAULT 'mailbox-v2' CHECK(execution_owner IN ('mailbox-v2','discussion-v1'))",
+                        'run_id TEXT REFERENCES discussion_runs(run_id)'],
+            'messages': ['run_id TEXT REFERENCES discussion_runs(run_id)', 'action_id TEXT REFERENCES discussion_actions(action_id)'],
+            'bindings': ['protocol_version INTEGER NOT NULL DEFAULT 2 CHECK(protocol_version IN (2,3))',
+                         'engine_version INTEGER NOT NULL DEFAULT 0 CHECK(engine_version IN (0,1))'],
+            'challenges': ['engine_version INTEGER NOT NULL DEFAULT 0 CHECK(engine_version IN (0,1))'],
+        }
+        for table, definitions in additions.items():
+            for definition in definitions:
+                conn.execute(f'ALTER TABLE {table} ADD COLUMN {definition}')
+        conn.execute('CREATE UNIQUE INDEX thread_run ON threads(run_id) WHERE run_id IS NOT NULL')
+        for table, (columns, rows) in original.items():
+            projected = ','.join('"' + column.replace('"', '""') + '"' for column in columns)
+            require(rows == [tuple(row) for row in conn.execute(f'SELECT {projected} FROM {table} ORDER BY rowid')],
+                    'MIGRATION_FAILED', f'Existing {table} data changed during migration')
+        require(not conn.execute('PRAGMA foreign_key_check').fetchall(), 'MIGRATION_FAILED', 'Migration foreign key check failed')
+        require(conn.execute('PRAGMA integrity_check').fetchone()[0] == 'ok', 'MIGRATION_FAILED', 'Migration integrity check failed')
+        conn.execute('PRAGMA user_version=3')
+        count = len(original['messages'][1])
+        db.event(conn, 'migrated', backup_path=str(backup_path), message_count=count, from_schema=2, to_schema=3)
+    return {'schema_version': 3, 'migrated': True, 'backup_path': str(backup_path), 'message_count': count}
+
+
 
 def _legacy_followups(rows):
     requests, replies = {}, {}
@@ -49,38 +95,33 @@ def migrate():
         if not path.exists():
             conn = db.connect(initialize=True)
             conn.close()
-            return {'schema_version': 2, 'created': True}
+            return {'schema_version': 3, 'created': True}
         conn = sqlite3.connect(path, timeout=10)
         conn.row_factory = sqlite3.Row
         try:
             version = db.schema_version(conn)
-            if version == 2:
-                result = {'schema_version': 2, 'migrated': False}
+            if version == 3:
+                result = {'schema_version': 3, 'migrated': False}
                 recorded = conn.execute("SELECT metadata FROM events WHERE event_type='migrated' ORDER BY seq DESC LIMIT 1").fetchone()
                 if recorded:
                     metadata = json.loads(recorded['metadata'])
                     result.update(backup_path=metadata['backup_path'], message_count=metadata['message_count'])
                 return result
+            if version == 2:
+                return _upgrade_v2(conn, path)
             if version == 0:
                 require(not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").fetchone(),
                         'UNSUPPORTED_SCHEMA', 'Refusing to initialize a database containing unknown tables')
                 conn.close()
                 with closing(db.connect(initialize=True)):
                     pass
-                return {'schema_version': 2, 'created': True}
+                return {'schema_version': 3, 'created': True}
             require(version == 1, 'UNSUPPORTED_SCHEMA', 'Only the legacy mailbox schema can migrate')
             require(conn.execute('PRAGMA integrity_check').fetchone()[0] == 'ok', 'DB_CORRUPT', 'Mailbox integrity check failed')
             conn.execute('PRAGMA foreign_keys=OFF')
             with db.transaction(conn):
-                backup_dir = db.secure_path(state / 'backups', directory=True, create=True)
-                backup_path = backup_dir / ('mailbox-v1-' + uuid.uuid4().hex + '.sqlite3')
-                # The write reservation prevents other writers; a separate reader backs up its committed snapshot.
-                backup_fd = os.open(backup_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-                os.close(backup_fd)
-                with closing(sqlite3.connect(path, timeout=10)) as reader, closing(sqlite3.connect(backup_path)) as backup:
-                    reader.backup(backup)
-                    require(backup.execute('PRAGMA integrity_check').fetchone()[0] == 'ok', 'BACKUP_FAILED', 'Backup integrity check failed')
-                os.chmod(backup_path, 0o600)
+                # A separate reader snapshots committed data while the writer reservation is held.
+                backup_path = _backup(path, 1)
                 rows = [dict(row) for row in conn.execute('SELECT rowid AS legacy_seq,* FROM messages ORDER BY rowid')]
                 conn.execute('ALTER TABLE messages RENAME TO legacy_messages')
                 for name, in conn.execute("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='legacy_messages' AND sql IS NOT NULL").fetchall():
@@ -144,9 +185,9 @@ def migrate():
                 conn.execute('DROP TABLE legacy_messages')
                 require(not conn.execute('PRAGMA foreign_key_check').fetchall(), 'MIGRATION_FAILED', 'Migration foreign key check failed')
                 require(conn.execute('PRAGMA integrity_check').fetchone()[0]=='ok', 'MIGRATION_FAILED', 'Migration integrity check failed')
-                conn.execute('PRAGMA user_version=2')
+                conn.execute('PRAGMA user_version=3')
                 db.event(conn,'migrated',backup_path=str(backup_path),message_count=len(rows))
-            return {'schema_version': 2, 'migrated': True, 'backup_path': str(backup_path), 'message_count': len(rows)}
+            return {'schema_version': 3, 'migrated': True, 'backup_path': str(backup_path), 'message_count': len(rows)}
         finally:
             conn.close()
 

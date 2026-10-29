@@ -27,7 +27,7 @@ class Leases(unittest.TestCase):
         self.actors=[]
         for sid,kind in (('a','codex'),('b','claude')):
             self.conn.execute("INSERT INTO sessions VALUES(?,?,NULL,'ready','now',NULL)",(sid,kind))
-            self.conn.execute("INSERT INTO bindings VALUES(?,?, 'ghostty',?,1,'test','now','now',1)",(sid,sid+'instance',sid+'surface'))
+            self.conn.execute("INSERT INTO bindings(session_id,instance_id,backend,surface_id,generation,evidence,bound_at,last_seen_at,active) VALUES(?,?, 'ghostty',?,1,'test','now','now',1)",(sid,sid+'instance',sid+'surface'))
             self.actors.append({'session_id':sid,'instance_id':sid+'instance','generation':1})
         self.conn.commit()
         self.a,self.b=self.actors
@@ -99,7 +99,7 @@ class Leases(unittest.TestCase):
     def test_rebind_fences_claim_even_without_deadline_expiry(self):
         self.send();claim=self.receive(self.b,'request')
         self.conn.execute("UPDATE bindings SET active=0 WHERE session_id='b'")
-        self.conn.execute("INSERT INTO bindings VALUES('b','new','ghostty','new-surface',2,'test','now','now',1)")
+        self.conn.execute("INSERT INTO bindings(session_id,instance_id,backend,surface_id,generation,evidence,bound_at,last_seen_at,active) VALUES('b','new','ghostty','new-surface',2,'test','now','now',1)")
         self.conn.commit()
         self.assert_code('STALE_BINDING',lambda:self.reply(claim['lease_token']))
         new_actor={'session_id':'b','instance_id':'new','generation':2}

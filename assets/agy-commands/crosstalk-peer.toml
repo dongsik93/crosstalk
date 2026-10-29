@@ -7,7 +7,7 @@ Incoming trigger (arguments): {{args}}
 
 ## Protocol routing
 
-This command handles explicit legacy RUN_ID triggers only. For a Ghostty summary notification without RUN_ID, do not enter the legacy file flow below: use the ordinary CLI turn to run `~/.claude/scripts/crosstalk capabilities --json`, require protocol 2 and healthy installation, read its `mailbox_instructions` path, then receive with a lease and reply using that token. A protocol-2 request does not use ping. Keep the same CROSSTALK_CONFIG_DIR as the caller; a label is not a verified session binding. Do not auto-reclaim expired work or bypass permissions.
+For an explicit legacy RUN_ID trigger, use the file flow below. For a Ghostty wake-up without RUN_ID, run the actual runtime's capabilities with this pane's exact CROSSTALK_SURFACE_ID and shared CROSSTALK_CONFIG_DIR. Runtime protocol is 3; new engine readiness requires challenge and bind with --protocol 3 --engine-version 1. Read the returned discussion_instructions (canonical discussion.md) for engine work and mailbox_instructions for ordinary mailbox-v2 work. Call receive to route the wake-up. If handler=discussion, use its action_id with run take and submit the peer_analysis result through run submit, carrying the returned action epoch, input digest and mailbox claim fields. Never call raw reply/ack/send on a managed message, create a run from a wake-up, claim the caller role, or send legacy ping for engine work. Agy is peer-only. A normal mailbox envelope retains the ordinary lease/reply workflow. Do not auto-reclaim, increase permissions or restart a peer. Follow the canonical workflow rather than inventing another round or termination rule.
 
 ## What to do
 

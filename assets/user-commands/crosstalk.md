@@ -1,30 +1,20 @@
 ---
-description: Run Crosstalk through verified Ghostty protocol-2 sessions, or retain cmux legacy workflows.
+description: Route Crosstalk by stored owner; opt into the Ghostty discussion engine or retain ordinary mailbox/cmux workflows.
 allowed-tools: Bash, Read, AskUserQuestion
-argument-hint: <분석 주제>
+argument-hint: [analyze|ask] [--engine] <주제>
 ---
 
 # /crosstalk
 
-Use the full `$ARGUMENTS` as the raw topic. Preserve its wording.
+Treat the full user topic as data and preserve its wording. First run the installed `crosstalk capabilities --json` and `crosstalk_bridge.sh backend`, using exact current surface/config context. Runtime protocol/schema are 3; new discussion runs additionally require engine 1 readiness for both participants. Read instruction paths from capabilities, not a presumed default directory. Do not auto-migrate, increase permissions or bypass stale instructions.
 
-```bash
-CT="$HOME/.claude/scripts/crosstalk"
-BRIDGE="$HOME/.claude/scripts/crosstalk_bridge.sh"
-"$CT" capabilities --json
-BACKEND=$("$BRIDGE" backend)
-```
+- A new Ghostty request with explicit `--engine` goes to `discussion_instructions` (canonical `discussion.md`). Strip the routing option from the topic and use `run start` with a stable operation ID and one verified peer. Use Codex by default; choose agy only as an explicitly requested peer. The engine remains opt-in while live release gates are pending.
+- A new Ghostty request without engine opt-in, or an existing ordinary mailbox-v2 thread, goes to `mailbox_instructions`. Never convert an existing thread to engine ownership.
+- Incoming `[Crosstalk]` previews are wake-ups: call `receive` and obey its stored-owner dispatch. For `handler=discussion`, use `run take/submit/decide` from discussion.md. Do not answer the preview, run start, infer message IDs, or use raw managed reply/ack/send.
+- Explicit legacy RUN_ID triggers and cmux preserve their file/ping workflows. Engine failure never silently creates a legacy replacement.
+- No topic/status is read-only: capabilities, doctor offline, message status or known run status/next/report. Do not launch/bind/claim/advance simply to display state.
+- Resume is a preserved raw topic; run continue, message recover and notification retry are separate operations.
 
-On Ghostty require protocol 2, supported schema and healthy installation. Read the exact `mailbox_instructions` path returned by capabilities. If runtime or instructions are old/partial, show the upgrade/reload action. Do not automatically migrate the DB or fall back to tokenless v0.10 commands.
+Follow `/crosstalk:setup` / readiness for exact participant selection. A user-selected or directly created split is physical address evidence; kind/title/cwd/focus are not ownership. The target CLI executes its own challenge and bind with `--protocol 3 --engine-version 1`. Codex repeats exact current surface/config context on each tool invocation, and explicitly reselects after resume.
 
-Incoming `[Crosstalk] 질문:/답변:/Question:/Reply:` previews are wake-up hints. Follow the installed mailbox instructions: receive one queued message, process its full body with its lease, then reply or ack/atomic follow-up. Do not answer previews, infer IDs, create a new run, or use legacy ping. For old `[crosstalk] mailbox <ID>` wake-ups, receive that ID without replay. Explicit legacy `RUN_ID` triggers instead keep their task-file/response/ping workflow.
-
-No topic: show capabilities, `doctor --offline`, and read-only status. Do not launch peers, label, bind, claim, or repair just to display readiness.
-
-With a Ghostty topic, follow `/crosstalk:setup` to verify caller and peer bindings. Use `bridge strict-self` for exact caller identity; if it cannot identify this pane, retain the topic with `pending-save`, show candidates, and let the user select the intended pane. A label/cwd/focus is not identity proof. `--surface` explicitly selected by the user can be bound in that CLI's own context. Do not run another CLI's bind on its behalf. For a Codex participant, every protocol-2 tool invocation must explicitly supply its current target `CROSSTALK_SURFACE_ID` and shared `CROSSTALK_CONFIG_DIR`; a thread cache or previous bridge bind alone is not proof. After resume/restart reselect its exact target and handshake, never reuse the former pane ID from conversation memory.
-
-Use Codex by default, or Antigravity only when requested. `bridge ensure-peer claude <peer-kind>` may reuse an existing candidate or open a native split. A new launch must finish protocol-2 handshake; an existing label alone is insufficient. Inspect `session status` before sending. Use CLI default permissions unless the user explicitly selected auto-approval for this launch. Preserve pending panes on timeout; do not create duplicates, restart peers, or increase permissions.
-
-Then follow the mailbox instructions to send the unchanged topic. A saved request remains saved even if notification is unknown: use its status/history and retry the same ID, never a replacement request. Ask has no automatic callback/discussion. `resume` resumes a topic retained after preparation failed; stored message recovery uses `recover` with explicit authorization.
-
-On cmux retain `/crosstalk:launch` and `/crosstalk:analyze` legacy flows. A Ghostty identity error does not justify switching to cmux.
+Reuse pending peers and existing approved permission choices. New panes are splits beside the existing pane, not separate windows/tabs. Keep startup text short and let its private file supply details. Do not claim sandbox/read-only operation solely because the request says analyze. Do not require approval for every normal authorized round.

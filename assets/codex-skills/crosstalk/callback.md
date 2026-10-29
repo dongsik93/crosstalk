@@ -1,6 +1,8 @@
+> Discussion-v1 notifications do not use this callback. Run capabilities and receive; for `handler=discussion`, read `discussion_instructions` and execute the stored action. This file handles explicit legacy RUN_ID callbacks only. Never create a run or raw follow-up from an engine wake-up.
+
 # $crosstalk callback
 
-This callback is only for explicit legacy `RUN_ID` conversations. New Ghostty reply previews use the protocol-2 mailbox: capabilities gate, receive, then ack or atomic send --after-reply. Never route a mailbox message to this file's ping logic.
+This callback is only for explicit legacy `RUN_ID` conversations. New Ghostty previews use capabilities and receive to dispatch by stored owner: discussion.md for managed actions, mailbox.md for ordinary mailbox-v2 work. Never route a mailbox message to this file's ping logic.
 
 
 Handle bridge callbacks sent to a Codex moderator.

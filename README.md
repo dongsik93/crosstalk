@@ -3,7 +3,7 @@
 English | [한국어](README.ko.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.10.6-blue)
+![Version](https://img.shields.io/badge/version-0.12.0--dev-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-black)
 
@@ -11,7 +11,7 @@ Discuss a topic with Claude and Codex side by side in Ghostty, or invite Antigra
 
 ![Crosstalk hero](docs/hero.png)
 
-> v0.11.0 implementation is unreleased. Protocol 2/schema 2 require an explicit upgrade and refreshed CLI instructions. Current live validation status is in [verification](docs/verification-v0.11.md); earlier v0.10 checks do not certify this protocol.
+> v0.12.0 is under verification. Protocol 3/schema 3 add discussion engine 1 as an explicit opt-in; existing mailbox-v2 threads keep their meaning. Use the [upgrade guide](docs/upgrade-v0.12.md) and [verification record](docs/verification-v0.12.md). Neither old live checks nor configured CI certify the new engine.
 
 ## Overview
 
@@ -21,14 +21,36 @@ Crosstalk connects existing interactive AI CLIs. Start from Codex with `$crossta
 
 | Capability | Ghostty on macOS | cmux |
 | --- | --- | --- |
-| Claude ↔ Codex analysis and callbacks | Protocol 2 implemented; live verification pending | Supported; Codex caller experimental |
+| Claude ↔ Codex ordinary mailbox | mailbox-v2 compatibility retained | Legacy supported; Codex caller experimental |
+| Discussion engine 1 (`--engine`) | One caller/one peer, explicit opt-in; v0.12 live checks pending | Unsupported; keep RUN_ID workflows |
 | Quick opinions (`ask`) | Supported | Supported |
 | Prepare peer panes | Native split or reuse in the same tab | Workspace splits through `:launch` |
-| Antigravity (`agy`) peer | Protocol 2 mailbox; live verification pending | Supported |
+| Antigravity (`agy`) peer | Ordinary compatibility; engine peer readiness requires protocol 3/engine 1 and live verification | Legacy supported |
 | Co-work and PR review | Not yet ported | Available; deep review experimental |
-| Screen capture / screen transport | Unavailable through the Ghostty 1.3 AppleScript API | Available |
+| Screen capture / screen transport | Unsupported by this adapter; not required by the engine | Legacy available |
 
 See the [Ghostty verification record](docs/ghostty-verification.md) for the actual checks and their limits. This checkout includes the Ghostty integration. Update older marketplace installations before following the quick start.
+
+## Opt-in discussion engine (v0.12)
+
+The engine stores the current run, round, action, fixed input and termination reason. AI performs analysis/comparison; code owns progression and atomic state changes. Start explicitly while live release gates are pending:
+
+```text
+# Claude
+/crosstalk:analyze --engine <topic>
+/crosstalk:ask --engine <question>
+# Codex
+$crosstalk analyze --engine <topic>
+$crosstalk ask --engine <question>
+```
+
+Both participants need verified protocol-3/engine-1 readiness. `capabilities --json` returns `discussion_instructions`; its [canonical workflow](assets/codex-skills/crosstalk/discussion.md) uses `run start`, `next`, `take`, `submit`, `decide`, `status`, `report` and explicit recovery controls. `run start` itself is the low-level opt-in; `engine_default=false` keeps normal new requests on ordinary mailbox behavior. Existing threads/runs never change execution owner silently.
+
+The caller must save its first analysis before Crosstalk APIs expose the peer's first answer. This is disclosure order, not isolation from a neighboring pane or proof against shared-context bias. Later decisions cite the fixed current results; a peer's agreement alone does not prove consensus. Final results distinguish the caller's conclusion, retained disagreement, insufficient information and round-limit termination.
+
+Ask stores each participant's answer and ends as sampled: no compare action, extra round, caller reply wake-up or pretend read acknowledgement. `run report` shows saved results on request. `run continue` releases workflow pause/local handoff; `recover` reclaims an authorized message lease; `retry` only resubmits a notification.
+
+No daemon, direct model API, model/effort override, agy caller, mixed-terminal run, multi-peer quorum or Ghostty cowork/review port is added. See [engine contract](docs/discussion-engine-v1.md), [adapters](docs/adapter-contracts.md), [upgrade](docs/upgrade-v0.12.md) and [current verification](docs/verification-v0.12.md). Startup text remains short; detailed handshake instructions live in a private temporary file.
 
 ## Features
 
@@ -37,7 +59,7 @@ See the [Ghostty verification record](docs/ghostty-verification.md) for the actu
 - **Automatic peer preparation**: launch the other CLI in the current directory when no labelled peer exists in the tab; wait for its startup acknowledgement before sending a task.
 - **Independent answers**: each participant receives the user's original topic.
 - **Durable mailbox**: Ghostty requests and replies are stored in SQLite. `send`, `receive`, and `reply` handle IDs, receipt state, and reply notifications; AIs no longer manage per-message MD files or ping commands.
-- **Explicit verdicts**: protocol-2 replies use explicit verdict/confidence fields; legacy cmux markers are safely parsed as JSON.
+- **Explicit results**: ordinary replies retain verdict/confidence fields; opt-in engine actions add fixed input references and structured comparison decisions. Legacy cmux markers remain safely parsed as JSON.
 - **Quick opinions**: `ask` lets each AI answer in its own pane without callbacks or aggregation.
 - **Advanced cmux workflows**: co-work in git worktrees, PR review, and Antigravity peers remain available through cmux.
 
@@ -46,7 +68,7 @@ See the [Ghostty verification record](docs/ghostty-verification.md) for the actu
 | Tool | Needed for | Notes |
 | --- | --- | --- |
 | macOS | Both terminal backends | Use an OS version supported by your terminal app |
-| Ghostty 1.3+ | Native Claude ↔ Codex workflow | macOS AppleScript support; no cmux or tmux required |
+| Ghostty with required AppleScript operations | Native Claude ↔ Codex workflow | Exact addressing/input capabilities must be observed; tested versions are in verification |
 | Claude Code or Codex CLI | Discussion caller | At least one is required to start a discussion |
 | Claude, Codex, or Antigravity (`agy`) | Peer | Install and authenticate the caller and the peer you choose |
 | jq | Bridge and configuration | Required |
@@ -194,17 +216,17 @@ crosstalk send agy "Review this approach" --summary "Reviewing the proposed appr
 
 From Claude, use `ensure-peer claude agy`. `agy` and `antigravity` resolve to the same peer kind. The launcher uses `agy --prompt-interactive` and preserves the caller PATH. The common permission choice above applies to agy too. Finish any login, project, or tool-approval prompts in the new pane. On timeout, reuse the pending pane instead of launching another copy.
 
-New agy panes complete protocol-2 handshake at startup. Existing panes must complete setup and read the `mailbox_instructions` path returned by capabilities before receiving. agy uses the same receive/lease/reply flow; `/crosstalk-peer ... RUN_ID=...` remains the legacy cmux handler. Callers remain Claude or Codex. Actual protocol-2 agy integration is not yet verified.
+New agy panes complete protocol-3/engine-1 readiness at startup. Existing panes must reload instructions and explicitly handshake before new engine work. `receive` dispatches managed work to the canonical `discussion_instructions`; ordinary mailbox-v2 work uses `mailbox_instructions`. `/crosstalk-peer ... RUN_ID=...` remains the legacy handler. agy is peer-only in the new engine; callers are Claude or Codex. v0.12 live validation remains pending.
 
 ### Identification and recovery
 
-Protocol 2 separates logical ownership from the physical pane. Claude/agy can use an exact TTY probe; Codex's CLI session ID alone does not prove its pane address. `bridge strict-self` refuses labels/cwd as fallback. Use `/crosstalk:setup --surface ghostty:<UUID>` for a user-selected target and let each CLI execute its own one-use challenge/bind. `session status` confirms readiness; labelling alone does not.
+Session bindings separate logical ownership from the physical pane. New engine work requires protocol 3 and engine 1 readiness; ordinary protocol-2 bindings do not imply that capability. Claude/agy can use an exact TTY probe; Codex's CLI session ID alone does not prove its pane address. `bridge strict-self` refuses labels/cwd as fallback. Use `/crosstalk:setup --surface ghostty:<UUID>` for a user-selected target and let each CLI execute its own one-use challenge/bind. `session status` confirms readiness; labelling alone does not.
 
 Resuming a CLI in another pane requires explicit rebind to the intended logical session and a new binding generation. Old work does not transfer merely because the old pane closed. If the old pane is still alive or repository context changed, confirm the handoff. Read history and use authorized recover for interrupted claims. Do not guess focus, title, kind or cwd.
 
-Codex must explicitly supply the exact current `CROSSTALK_SURFACE_ID` and shared `CROSSTALK_CONFIG_DIR` on every protocol-2 invocation. Its thread cache cannot prove its pane after resume, even while the previous pane is still alive. Reselect the current target and handshake after restart/resume; do not copy an old surface from conversation memory. See [protocol 2](docs/protocol-v2.md) for the invocation form.
+Codex must explicitly supply the exact current `CROSSTALK_SURFACE_ID` and shared `CROSSTALK_CONFIG_DIR` on every Ghostty protocol invocation. Its thread cache cannot prove its pane after resume, even while the previous pane is still alive. Reselect the current target and handshake after restart/resume; do not copy an old surface from conversation memory. See [readiness](assets/codex-skills/crosstalk/readiness.md) for current invocation and handshake forms.
 
-On startup timeout reuse the pending pane and address its observed login/trust prompt; do not launch duplicates or bypass permission settings. Unknown panes may be labelled as candidates but still need protocol-2 handshake. No Ghostty screen-capture/footer-readiness fallback exists. Cowork and review remain cmux-only.
+On startup timeout reuse the pending pane and address its observed login/trust prompt; do not launch duplicates or bypass permission settings. Unknown panes may be labelled as candidates but still need a verified protocol/engine handshake. No Ghostty screen-capture/footer-readiness fallback exists. Cowork and review remain cmux-only.
 
 Inspect exact candidate addresses with:
 
@@ -215,7 +237,7 @@ crosstalk doctor --offline
 crosstalk session status
 ```
 
-Long bodies remain in SQLite. Notification submission is separate from receipt and completion. The automated suite uses isolated fake terminals; real protocol-2 acceptance is tracked in [verification](docs/verification-v0.11.md).
+Long bodies remain in SQLite. Notification submission is separate from receipt and completion. The automated suite uses isolated fake terminals; v0.12 engine acceptance is tracked separately in [verification](docs/verification-v0.12.md).
 
 ## Demo
 
@@ -267,9 +289,9 @@ These exist for manual control or recovery — you typically don't need them.
 | `/crosstalk:review [PR]` | cmux workflow: moderator-driven PR review using `gh pr diff`. |
 | `/crosstalk:review --deep [PR]` | cmux workflow: pinned detached worktree review with safe cleanup. |
 
-## How It Works — Ghostty mailbox protocol 2
+## How It Works — ordinary mailbox-v2 compatibility
 
-First complete caller and peer handshake through setup. `crosstalk capabilities --json` reports protocol/schema and the actual mailbox instruction path. Labels alone do not establish ownership. `send` selects a verified logical peer; if kind alone is ambiguous, select its `--peer-session` explicitly. `~/.claude/scripts/crosstalk` is the direct path if the executable is not on PATH.
+This section is for ordinary threads, not managed discussion-v1 messages. Complete caller and peer handshake through setup. `crosstalk capabilities --json` reports protocol/schema and the actual mailbox instruction path. Labels alone do not establish ownership. `send` selects a verified logical peer; if kind alone is ambiguous, select its `--peer-session` explicitly. `~/.claude/scripts/crosstalk` is the direct path if the executable is not on PATH.
 
 ```sh
 crosstalk capabilities --json
@@ -391,14 +413,14 @@ Custom presets live here (each rule/persona file is loaded into the preamble ver
 - **Legacy file runs require `bridge ping`**: completion is event-based — if a peer never pings, the moderator stays idle. You can manually call `bridge ping <RUN_ID> <agent> <round>` from any pane to unblock.
 - **AI may ignore transport instructions**: cmux opt-in `--transport file/screen` modes treat this as a protocol error with retry/skip/stop choices.
 - **Deep PR review needs live validation**: detached worktrees share Git metadata and are not a security sandbox; unsafe cleanup is refused.
-- **Callbacks depend on CLI input handling**: protocol-2 actual-terminal verification is still pending; a busy CLI or permission dialog may delay input processing. Check mailbox receipt state before assuming the peer started work; legacy ping does not acknowledge each earlier trigger.
+- **Callbacks depend on CLI input handling**: v0.12 engine actual-terminal verification remains pending; a busy CLI or permission dialog may delay input processing. Check mailbox receipt state before assuming the peer started work; legacy ping does not acknowledge each earlier trigger.
 - **Antigravity caller is not supported**: Antigravity (`agy`) participates as a peer only; runs must be started from Claude or Codex.
 
 ## Roadmap
 
 - Ghostty support for advanced cowork/review workflows
 - Per-peer model and effort selection
-- Further delivery diagnostics; automatic task re-execution is not a v0.11 guarantee
+- Further delivery diagnostics; automatic task re-execution remains outside the guarantee
 - Antigravity moderator mode
 - Additional CLI adapters
 - tmux and zellij support

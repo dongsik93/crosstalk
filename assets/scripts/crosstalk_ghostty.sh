@@ -24,6 +24,13 @@ on run argv
       end repeat
       return rows
     end if
+    if op is "tty-list" then
+      set rows to ""
+      repeat with term in terminals
+        set rows to rows & id of term & (character id 9) & (tty of term as text) & linefeed
+      end repeat
+      return rows
+    end if
     if op is "cwd-list" then
       set rows to ""
       repeat with term in terminals
@@ -260,7 +267,7 @@ PYPROBE
 }
 
 ghostty_self() {
-  local context pid device id cache stamp evidence
+  local context pid device id cache stamp evidence rows matches
   if [ -n "${CROSSTALK_SURFACE_ID:-}" ]; then
     id=$(ghostty_id "$CROSSTALK_SURFACE_ID") || return
     ghostty_rpc exists "$id" >/dev/null || return
@@ -274,16 +281,26 @@ ghostty_self() {
     cache="${CROSSTALK_CONFIG_DIR:-$HOME/.claude/crosstalk}/ghostty/bind-$pid.json"
     id=$(jq -r --arg stamp "$stamp" --arg tty "$device" 'select(.stamp == $stamp and .tty == $tty) | .id' "$cache" 2>/dev/null || true)
     evidence=$(jq -r '.evidence // "legacy"' "$cache" 2>/dev/null || true)
-    if [ "${CROSSTALK_STRICT_IDENTITY:-0}" = 1 ] && [ "$evidence" != explicit ] && [ "$evidence" != probe ]; then
+    if [ "${CROSSTALK_STRICT_IDENTITY:-0}" = 1 ] && [ "$evidence" != explicit ] && [ "$evidence" != probe ] && [ "$evidence" != tty ]; then
       id=""
     fi
     # A cached pane that is gone (e.g. `codex resume` in a new pane) is re-resolved, not an error.
     if [ -n "$id" ] && ghostty_id "$id" >/dev/null && ghostty_rpc exists "$id" >/dev/null 2>&1; then
       :
     else
-      # Probe the caller's own TTY first (exact). Codex has no TTY of its own (shared daemon),
-      # so it falls back to a label written by `setup` from any pane, matched by CLI kind.
-      # shortcut: two same-kind Codex panes in one cwd still need bind <ID>.
+      # Current Ghostty exposes the actual TTY; directory reporting is not identity evidence.
+      if [[ "$device" =~ ^ttys[0-9]+$ ]]; then
+        if rows=$(ghostty_rpc tty-list); then
+          matches=$(awk -F'\t' -v tty="/dev/$device" '$2 == tty {print $1}' <<< "$rows")
+          if [ "$(printf '%s\n' "$matches" | grep -c .)" -ne 1 ]; then
+            echo "ERROR: caller TTY /dev/$device does not identify exactly one Ghostty pane" >&2
+            return 1
+          fi
+          ghostty_bind "$matches" tty
+          return
+        fi
+      fi
+      # Older Ghostty without TTY enumeration retains the exact OSC 7 compatibility probe.
       evidence=probe
       if ! id=$(ghostty_probe "$device"); then
         if [ "${CROSSTALK_STRICT_IDENTITY:-0}" = 1 ]; then
@@ -298,6 +315,34 @@ ghostty_self() {
     fi
   fi
   printf 'ghostty:%s\n' "$id"
+}
+
+ghostty_context() {
+  local surface device
+  surface="ghostty:$(ghostty_id "$1")" || return
+  device=$(ghostty_rpc tty "${surface#ghostty:}") || return
+  python3 - "$surface" "$device" <<'PYCONTEXT'
+import json, re, subprocess, sys
+surface, device = sys.argv[1:]
+if not re.fullmatch(r'/dev/(ttys[0-9]+|pts/[0-9]+)', device):
+    sys.exit('ERROR: invalid terminal TTY')
+try:
+    rows = subprocess.run(['ps', '-t', device.removeprefix('/dev/'), '-o',
+                           'pid=,pgid=,tpgid=,stat=,comm='], capture_output=True,
+                          text=True, timeout=2, check=True).stdout.splitlines()
+    processes = []
+    for line in rows:
+        row = line.split(None, 4)
+        if len(row) != 5 or row[1] != row[2] or not row[2].isdigit() or int(row[2]) <= 1 or 'T' in row[3] or 'Z' in row[3]:
+            continue
+        stamp = subprocess.run(['ps', '-o', 'lstart=', '-p', row[0]], capture_output=True,
+                               text=True, timeout=2, check=True).stdout.strip()
+        if stamp:
+            processes.append({'process_id': row[0], 'process_start': stamp, 'executable': row[4]})
+    print(json.dumps({'surface_id': surface, 'tty': device, 'processes': processes}))
+except (OSError, subprocess.SubprocessError):
+    sys.exit('ERROR: cannot inspect terminal foreground context')
+PYCONTEXT
 }
 
 ghostty_identity() {
@@ -369,69 +414,10 @@ ghostty_get_label() {
 }
 
 ghostty_launch() {
-  local kind="${1:?kind required}" self id binary ready prompt command child binding launcher max_wait executable runtime transport config instructions startup
-  local cli_args=()
-  local approval="${2:-}"
-  if [ "$#" -gt 2 ] || { [ -n "$approval" ] && [ "$approval" != --auto-approve ]; }; then
-    echo "ERROR: usage: launch <kind> [--auto-approve]" >&2; return 1
-  fi
-  [ "$kind" != agy ] || kind=antigravity
-  case "$kind" in
-    claude|codex) executable="$kind" ;;
-    antigravity) executable=agy; cli_args=(--prompt-interactive) ;;
-    *) echo "ERROR: Ghostty launch supports claude, codex, or antigravity (agy)" >&2; return 1 ;;
-  esac
-  if [ "$approval" = --auto-approve ]; then
-    case "$kind" in
-      codex) cli_args=(--yolo) ;;
-      claude) cli_args=(--dangerously-skip-permissions) ;;
-      antigravity) cli_args=(--dangerously-skip-permissions --prompt-interactive) ;;
-    esac
-  fi
-  max_wait="${READY_MAX_WAIT:-60}"
-  validate_positive_int "$max_wait" READY_MAX_WAIT || return
-  binary=$(command -v "$executable") || { echo "ERROR: $kind is not installed" >&2; return 1; }
-  self=$(self_surface) || return
-  id=$(ghostty_id "$self") || return
-  ready=$(mktemp "${TMPDIR:-/tmp}/crosstalk-ready.XXXXXXXX") || return
-  startup=$(mktemp /tmp/ct-startup.XXXXXXXX) || { rm -f "$ready"; return 1; }
-  binding="$ready.surface"
-  launcher="$ready.launch"
-  runtime=$(python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve().with_name("crosstalk"))' "${BASH_SOURCE[0]}")
-  transport="${runtime}_bridge.sh"
-  config="${CROSSTALK_CONFIG_DIR:-$HOME/.claude/crosstalk}"
-  # The startup prompt runs inside the actual CLI; the bridge never recursively calls mailbox.
-  # Expansions in generated commands belong to the target CLI, not this launcher.
-  # shellcheck disable=SC2016
-  printf -v prompt 'export CROSSTALK_CONFIG_DIR=%q CROSSTALK_SURFACE_ID=__SID__; %q bind __SID__ >/dev/null && CHALLENGE=$(%q session challenge --surface __SID__ --kind %q | python3 -c %q) && %q session bind --challenge "$CHALLENGE" --kind %q --protocol 2 >/dev/null && printf ready > %q && rm -f %q' \
-    "$config" "$transport" "$runtime" "$kind" 'import json,sys; print(json.load(sys.stdin)["challenge"])' "$runtime" "$kind" "$ready" "$startup"
-  printf -v instructions 'env CROSSTALK_CONFIG_DIR=%q CROSSTALK_SURFACE_ID=__SID__ %q capabilities --json' "$config" "$runtime"
-  prompt="Crosstalk startup check. Run exactly: $prompt . Then say Crosstalk ready and finish this turn. Do not modify project files. For later [Crosstalk] notifications, run $instructions and read its mailbox_instructions path. Explicitly supply these environment values on every mailbox tool command in this pane; after resume elsewhere complete a new address handshake. Receive one message at a time, process only its returned body, and use its lease token when replying or acknowledging. Do not answer previews directly. Legacy messages may still name task files."
-  # The child waits for its exact ID before starting the CLI (same cwd is now ambiguous).
-  # Keep the program in a private script: Ghostty only parses an executable and one path.
-  (umask 077
-    # shellcheck disable=SC2016
-    {
-      printf '#!/bin/bash\nset -euo pipefail\n'
-      printf 'unset CODEX_THREAD_ID\n'
-      printf 'export CROSSTALK_CONFIG_DIR=%q\n' "$config"
-      printf 'p=%q\n' "$prompt"
-      printf 'for i in {1..100}; do if [ -s %q ]; then export CROSSTALK_SURFACE_ID="$(cat %q)"; ' "$binding" "$binding"
-      printf 'printf "%%s\\n" "${p//__SID__/$CROSSTALK_SURFACE_ID}" > %q; rm -f %q "$0"; exec ' "$startup" "$binding"
-      printf '%q ' "$binary" ${cli_args[@]+"${cli_args[@]}"}
-      printf '%q' "Crosstalk startup check. Read $startup."
-      printf '; fi; sleep 0.1; done; echo "Crosstalk launch binding timed out" >&2; rm -f %q "$0"; exit 1\n' "$startup"
-    } > "$launcher"
-  )
-  printf -v command '/bin/bash %q' "$launcher"
-  child=$(ghostty_rpc split "$id" "$PWD" "$command" "$PATH") || { rm -f "$ready" "$launcher" "$startup"; return 1; }
-  child="ghostty:$child"
-  ghostty_label "$child" "$kind" || return
-  printf '%s\n' "$ready" > "$(ghostty_label_path "$child").ready"
-  printf '%s\n' "$child" > "$binding"
-  echo "STATE: launched surface=$child kind=$kind" >&2
-  ghostty_wait_ready "$child" || return
-  echo "$child"
+  [ "$#" -ne 2 ] || [ -n "$2" ] || set -- "$1"
+  local scripts
+  scripts=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+  PYTHONPATH="$scripts${PYTHONPATH:+:$PYTHONPATH}" python3 -m crosstalk_lib.adapters launch "$@"
 }
 
 # A timed-out launch remains discoverable, but is never reported ready just because it has a label.

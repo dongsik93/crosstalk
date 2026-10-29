@@ -1,23 +1,14 @@
-# Ghostty mailbox protocol 2 — Claude, Codex, Antigravity
+# Ghostty ordinary mailbox compatibility — Claude, Codex, Antigravity
 
-Protocol version: **2**. This file applies only to new Ghostty mailbox conversations. Explicit legacy `RUN_ID` triggers keep their file/ping workflows. Do not use mailbox IDs as RUN_IDs or create per-message transport files.
+Stored owner: **mailbox-v2**. This file applies to ordinary Ghostty mailbox conversations. Explicit legacy `RUN_ID` triggers keep their file/ping workflows. Do not use mailbox IDs as RUN_IDs or create per-message transport files.
 
-Before any mailbox work, run `~/.claude/scripts/crosstalk capabilities --json`. Require `protocol_version=2`, supported schema, and healthy installation. Read the mailbox instructions from the `mailbox_instructions` path returned by capabilities, rather than assuming the default config directory. On `PROTOCOL_MISMATCH`, `MIGRATION_REQUIRED`, or partial installation, stop and show the required upgrade/reload action. Do not silently migrate a live DB or permit a tokenless reply. Long-running CLIs must reread the installed protocol-2 instructions after upgrade.
+This file is only for ordinary `execution_owner=mailbox-v2` threads under the v0.12 runtime. It preserves their v0.11 behavior; those threads are not upgraded into engine runs. Runtime protocol/schema are 3, while `mailbox-v2` names the stored compatibility owner.
 
-Both CLIs must use the same `CROSSTALK_CONFIG_DIR` (default `~/.claude/crosstalk`). Configuration, rule/persona files, DB and recovery state live there. Determine the backend through `crosstalk_bridge.sh backend`. Terminal preparation is described in `readiness.md`; both caller and peer need verified protocol-2 bindings. Labels and a successful UI send are not readiness or receipt.
+Before mailbox work run the actual installed `crosstalk capabilities --json`, check installation/schema health, and read its `mailbox_instructions`. Both CLIs use the same `CROSSTALK_CONFIG_DIR`. Every Codex invocation also supplies this execution's verified exact `CROSSTALK_SURFACE_ID`; no cached former-pane address after resume.
 
-## Codex invocation identity
+If receive returns `handler=discussion`, stop this workflow and read the capabilities result’s `discussion_instructions` path (canonical `discussion.md`). That envelope only routes work: `run take` obtains the managed action and lease, and `run submit/decide` commits its result. Do not call raw `reply`, `ack` or `send --thread` on a managed message or bypass `RUN_MANAGED_BY_ENGINE`. A blocked initial reply or informational ask result is not a reason to recreate work. Incoming previews never authorize `run start`.
 
-Codex requires exact current-invocation surface context on **every** protocol-2 tool call. Its shared tool daemon may omit parent environment, and `CODEX_THREAD_ID` plus a saved bridge binding cannot distinguish the same thread resumed in another live pane. Prefix each invocation (or explicitly export in that same tool shell):
-
-```bash
-env CROSSTALK_CONFIG_DIR="<SHARED_CONFIG_ROOT>" CROSSTALK_SURFACE_ID="ghostty:<CURRENT_SELECTED_UUID>" \
-  <ABSOLUTE_CROSSTALK_RUNTIME> receive
-```
-
-The UUID must come from this execution's targeted launch/handshake or explicit user selection. Do not reconstruct it from a thread cache, kind, cwd, or an old resumed conversation. After restart/resume, reselect and complete the new target handshake before acting; do not reuse an inherited stale surface value. Replace `receive` with the needed send/reply/ack/renew/status command and preserve these same per-call environment arguments. A plain `bridge bind` only updates legacy transport cache and does not satisfy strict Codex identity by itself.
-
-All abbreviated command examples below assume that exact per-invocation environment is supplied in the current tool shell.
+New engine runs require explicit opt-in and protocol-3/engine-1 handshakes. Ordinary threads can continue with their existing compatible bindings; use `readiness.md` for deliberate updates and transfer. Legacy RUN_ID messages remain separate file/ping conversations.
 
 ## Start a discussion
 

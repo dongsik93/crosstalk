@@ -13,34 +13,11 @@ BRIDGE_TIMEOUT = 10
 
 
 def bridge(*args):
-    path = os.environ.get('CROSSTALK_BRIDGE', str(Path(__file__).resolve().parents[1] / 'crosstalk_bridge.sh'))
+    from .adapters.registry import call_terminal
     timeout = BRIDGE_TIMEOUT
-    if args and args[0] in ('launch', 'ensure-peer', 'wait-ready'):
-        timeout = max(10, int(os.environ.get('READY_MAX_WAIT', '120'))) + 10
-    process = subprocess.Popen([path, *map(str,args)], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                               text=True, start_new_session=True)
-    try:
-        output, error = process.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        # The process group contains only the helper we started, never a user's AI process.
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        try:
-            process.communicate(timeout=1)
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            process.communicate(timeout=1)
-        raise Error('TERMINAL_TIMEOUT', 'Terminal helper timed out') from None
-    if process.returncode:
-        # Helper stderr can contain terminal contents or credentials; do not copy it into events.
-        code = 'NOTIFICATION_UNKNOWN' if args and args[0]=='send' else 'NOTIFICATION_FAILED'
-        raise Error(code, 'Terminal helper did not confirm completion')
-    return output.strip()
+    if args and args[0] in ('launch','ensure-peer','wait-ready'):
+        timeout = max(10, int(os.environ.get('READY_MAX_WAIT','120'))) + 10
+    return call_terminal(*args, timeout=timeout)
 
 
 def verify_target(binding):
@@ -94,8 +71,10 @@ def notify(conn, row, *, retry=False):
             current_key = (current['attempt_id'], current['state'], current['finished_at']) if current else None
             if current and current_key != observed_key:
                 return result(current)
-            fresh = conn.execute('SELECT processing_state FROM messages WHERE id=?', (mid,)).fetchone()
+            fresh = conn.execute('SELECT * FROM messages WHERE id=?', (mid,)).fetchone()
             require(fresh, 'STATE_CONFLICT', 'Message no longer exists')
+            from .engine.service import delivery_allowed, notification_preview
+            if not delivery_allowed(conn,fresh): return result(current)
             if fresh['processing_state'] != 'queued' or (current and current['state'] == 'suppressed'):
                 return result(current)
             if current and current['state'] != 'not_attempted' and not retry:
@@ -104,6 +83,7 @@ def notify(conn, row, *, retry=False):
             require(binding, 'CALLER_UNBOUND', 'Recipient must complete a binding handshake')
             attempt = current['attempt_id'] if current and current['state'] == 'not_attempted' else uuid.uuid4().hex
             with db.transaction(conn):
+                if not delivery_allowed(conn,fresh): return result(current)
                 if current and current['state'] == 'in_flight':
                     conn.execute("UPDATE delivery_attempts SET state='unknown',finished_at=?,error_code='NOTIFICATION_UNKNOWN' WHERE attempt_id=?", (now(),current['attempt_id']))
                 conn.execute('INSERT INTO delivery_attempts(attempt_id,message_id,target_surface_id,target_binding_generation,state,started_at) VALUES(?,?,?,?,?,?) ON CONFLICT(attempt_id) DO UPDATE SET target_surface_id=excluded.target_surface_id,target_binding_generation=excluded.target_binding_generation,state=excluded.state,started_at=excluded.started_at',
@@ -113,7 +93,7 @@ def notify(conn, row, *, retry=False):
             try:
                 korean = bridge('get-language') == 'ko'
                 kind = ('답변' if row['kind']=='reply' else '질문') if korean else ('Reply' if row['kind']=='reply' else 'Question')
-                preview = ' '.join((row['summary'].strip() or row['body']).split())
+                preview = notification_preview(conn,fresh) or ' '.join((row['summary'].strip() or row['body']).split())
                 preview = ''.join(c for c in preview if c.isprintable())
                 if len(preview) > 160: preview = preview[:159] + '…'
                 verify_target(binding)

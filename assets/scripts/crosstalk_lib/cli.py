@@ -1,4 +1,4 @@
-"""Protocol 2 CLI. State changes are delegated to their owning modules."""
+"""Protocol 3 CLI with compatible ordinary mailbox and opt-in discussion commands."""
 import argparse
 import json
 import os
@@ -6,7 +6,7 @@ from pathlib import Path
 import sqlite3
 import subprocess
 import sys
-from . import PROTOCOL_VERSION, RUNTIME_VERSION, SCHEMA_VERSION, db, doctor, migrations, sessions
+from . import ENGINE_VERSION, PROTOCOL_VERSION, RUNTIME_VERSION, SCHEMA_VERSION, db, doctor, migrations, sessions
 from .protocol import Error, now, require
 
 
@@ -16,10 +16,12 @@ class Parser(argparse.ArgumentParser):
 
 
 def parser():
-    result=Parser(description='Crosstalk durable mailbox protocol 2')
+    result=Parser(description='Crosstalk mailbox protocol 3 and discussion engine 1')
     commands=result.add_subparsers(dest='command',required=True,parser_class=Parser)
     capabilities=commands.add_parser('capabilities')
     capabilities.add_argument('--json',action='store_true')
+    from .engine import service
+    service.add_parser(commands)
     migrations.add_parser(commands)
     sessions.add_parser(commands)
     doctor.add_parser(commands)
@@ -90,8 +92,10 @@ def capabilities():
             finally: conn.close()
         except (sqlite3.Error,Error): version='unsupported'
     return {'runtime_version':RUNTIME_VERSION,'protocol_version':PROTOCOL_VERSION,'schema_version':version,
+            'engine_version':ENGINE_VERSION,'engine_available':True,'engine_default':False,
+            'discussion_instructions':str(script_root.parent/'codex-skills/crosstalk/discussion.md'),
             'supported_schema_version':SCHEMA_VERSION,'backend':'ghostty','installation_health':health,
-            'mailbox_instructions':str(instructions),'supported_commands':['capabilities','migrate','session','send','receive','reply','ack','renew','retry','recover','cancel','status','history','doctor','review','install','uninstall']}
+            'mailbox_instructions':str(instructions),'supported_commands':['run','capabilities','migrate','session','send','receive','reply','ack','renew','retry','recover','cancel','status','history','doctor','review','install','uninstall']}
 
 
 def maintenance():
@@ -112,8 +116,11 @@ def dispatch(args):
     if args.command in ('install','uninstall'):
         from . import installer
         return installer.run(args)
-    readonly=args.command in ('status','history') or (args.command=='recover' and not args.reclaim) or (args.command=='session' and args.session_command=='status')
+    readonly=(args.command=='run' and args.run_command in ('next','status','report','export')) or args.command in ('status','history') or (args.command=='recover' and not args.reclaim) or (args.command=='session' and args.session_command=='status')
     if not readonly: maintenance()
+    if args.command=='run':
+        from .engine import service
+        return service.run(args)
     if args.command=='review':
         from . import reviews
         return reviews.run(args)

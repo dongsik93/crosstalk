@@ -34,7 +34,7 @@ def inspect():
             result['messages']=[{'id':row['id'],'processing_state':row['processing_state'],'effective_state':effective_state(row),
                                  'attempt_count':row['attempt_count'],'claim_version':row['claim_version'],
                                  'recipient_session_id':row['recipient_session_id'],'lease_expires_at':row['lease_expires_at']}
-                                for row in conn.execute("SELECT * FROM messages WHERE processing_state NOT IN ('completed','cancelled') ORDER BY seq")]
+                                for row in conn.execute("SELECT * FROM messages WHERE processing_state NOT IN ('completed','cancelled') AND NOT (kind='reply' AND run_id IN (SELECT run_id FROM discussion_runs WHERE mode='ask' AND lifecycle='completed')) ORDER BY seq")]
             result['unresolved_sessions']=[dict(row) for row in conn.execute("SELECT session_id,kind,legacy_surface FROM sessions WHERE status='unresolved'")]
             result['delivery']=[delivery.attempt_view(row) for row in conn.execute('''
                 SELECT a.*,m.processing_state FROM delivery_attempts a JOIN messages m ON m.id=a.message_id
@@ -46,6 +46,7 @@ def inspect():
                                              'message_id':attempt['message_id'],'delivery_state':attempt['effective_state'],
                                              'next_action':f"Inspect status {attempt['message_id']} and recipient binding, then retry {attempt['message_id']} if appropriate"})
             result['reviews']=[dict(row) for row in conn.execute("SELECT run_id,worktree_path,state,last_error FROM review_runs WHERE state IS NOT NULL AND state!='removed'")]
+            result['discussion_runs']=[dict(row) for row in conn.execute('SELECT run_id,mode,lifecycle,phase,current_round,caller_session_id,peer_session_id,outcome FROM discussion_runs ORDER BY created_at')]
             result['runtime_healthy']=True
         finally: conn.close()
     except (Error,sqlite3.Error,OSError) as exc:

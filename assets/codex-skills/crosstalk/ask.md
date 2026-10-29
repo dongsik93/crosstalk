@@ -1,6 +1,9 @@
 # $crosstalk ask — fire-and-forget
 
-For a new Ghostty request or an incoming mailbox notification, run `~/.claude/scripts/crosstalk capabilities --json`, require protocol 2 and healthy installation, read its returned mailbox instruction path, and follow that protocol-2 flow instead of the legacy steps below. Existing RUN_ID triggers still follow the legacy steps.
+For Ghostty, first check `crosstalk capabilities --json` and exact readiness. New `--engine` requests explicitly opt into the discussion engine; read its returned `discussion_instructions` (canonical `discussion.md`) and stop before the legacy steps below. Without that opt-in, ordinary mailbox-v2 work follows `mailbox_instructions`. Incoming previews call `receive`; `handler=discussion` routes to `run take/submit/decide` using the canonical workflow, never to a fresh start or raw managed reply/ack. Existing explicit RUN_ID triggers and cmux alone use the legacy steps below. Runtime protocol is 3; new engine participants require protocol 3 and engine 1 readiness.
+
+
+## Legacy cmux / explicit RUN_ID workflow
 
 Quick opinion sampling. Caller fans out the question and answers in its own pane. Peers answer in their own panes. No ping, no callback, no aggregation.
 

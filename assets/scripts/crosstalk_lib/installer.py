@@ -16,9 +16,14 @@ import uuid
 
 
 MANIFEST = 'installation.json'
-SCRIPTS = ('crosstalk', 'crosstalk_bridge.sh', 'crosstalk_ghostty.sh')
+SCRIPTS = ('crosstalk', 'crosstalk_bridge.sh', 'crosstalk_ghostty.sh', 'crosstalk_terminal.sh')
 RUNTIME_MODULES = ('__init__', 'cli', 'db', 'delivery', 'doctor', 'installer', 'legacy',
-                   'mailbox', 'migrations', 'protocol', 'reviews', 'sessions')
+                   'mailbox', 'migrations', 'protocol', 'reviews', 'sessions',
+                   'engine/__init__', 'engine/contracts', 'engine/state', 'engine/store',
+                   'engine/context', 'engine/report', 'engine/service',
+                   'adapters/__init__', 'adapters/__main__', 'adapters/contracts', 'adapters/registry',
+                   'adapters/cli/__init__', 'adapters/terminal/__init__')
+RUNTIME_TEMPLATES = ('local_initial.md', 'peer_analysis.md', 'compare.md')
 
 
 def _safe(path):
@@ -115,11 +120,12 @@ def _invoke(argv, root, home):
 
 def _sources(source):
     required = ['VERSION', 'assets/scripts/crosstalk', 'assets/scripts/crosstalk_bridge.sh',
-                'assets/scripts/crosstalk_ghostty.sh', 'assets/scripts/crosstalk_lib/__init__.py',
+                'assets/scripts/crosstalk_ghostty.sh', 'assets/scripts/crosstalk_terminal.sh', 'assets/scripts/crosstalk_lib/__init__.py',
                 'assets/scripts/crosstalk_lib/cli.py', 'assets/codex-skills/crosstalk/SKILL.md',
-                'assets/codex-skills/crosstalk/mailbox.md', 'assets/user-commands/crosstalk.md',
+                'assets/codex-skills/crosstalk/mailbox.md', 'assets/codex-skills/crosstalk/discussion.md', 'assets/user-commands/crosstalk.md',
                 'assets/agy-commands/crosstalk-peer.toml']
     required.extend(f'assets/scripts/crosstalk_lib/{name}.py' for name in RUNTIME_MODULES)
+    required.extend(f'assets/scripts/crosstalk_lib/engine/templates/{name}' for name in RUNTIME_TEMPLATES)
     for rel in required:
         if not _safe(source / rel).is_file():
             raise ValueError(f'Incomplete release: {rel}')
@@ -341,8 +347,8 @@ def install(source, home=None, language=None, quiesced=False):
     root = _safe(Path(os.environ.get('CROSSTALK_CONFIG_DIR', home / '.claude/crosstalk')).absolute())
     files = _sources(source)
     version = (source / 'VERSION').read_text().strip()
-    if not re.fullmatch(r'0\.11\.\d+(?:[-.][A-Za-z0-9]+)*', version):
-        raise ValueError('Installer only accepts protocol-2 v0.11 releases; down-migration is unsupported')
+    if not re.fullmatch(r'0\.12\.\d+(?:[-.][A-Za-z0-9]+)*', version):
+        raise ValueError('Installer only accepts protocol-3 v0.12 releases; down-migration is unsupported')
     content_id = hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()[:16]
     canonical_release = root / 'releases' / f'{version}-{content_id}'
     with _lock(root):
@@ -365,7 +371,7 @@ def install(source, home=None, language=None, quiesced=False):
                 retained = str(release)
                 release = root / 'releases' / f'{version}-{content_id}-{uuid.uuid4().hex}'
             manifest = {
-                'release_version': version, 'protocol_version': 2, 'schema_version': 2,
+                'release_version': version, 'protocol_version': 3, 'schema_version': 3, 'engine_version': 1,
                 'release_path': str(release), 'release_files': files,
                 'previous_release': previous.get('release_path') if previous else None,
                 'install_id': uuid.uuid4().hex, 'phase': 'staging',
@@ -411,7 +417,7 @@ def install(source, home=None, language=None, quiesced=False):
             manifest['phase'] = 'migrated'
             _save(root, manifest)
             capabilities = _invoke([sys.executable, executable, 'capabilities', '--json'], root, home)
-            if capabilities.get('protocol_version') != 2 or capabilities.get('runtime_version') != version or capabilities.get('schema_version') != 2:
+            if capabilities.get('protocol_version') != 3 or capabilities.get('runtime_version') != version or capabilities.get('schema_version') != 3 or capabilities.get('engine_version') != 1:
                 raise ValueError('Runtime/protocol version mismatch')
             _check_runtime(executable, root, home)
             _pointer(root, release)
@@ -451,7 +457,7 @@ def install(source, home=None, language=None, quiesced=False):
     return {'installed': True, 'release_version': version, 'manifest': str(root / MANIFEST),
             'migration_backup': manifest['migration_backup'], 'backups': manifest['backups'],
             'retained_release': manifest.get('retained_release'),
-            'next_action': 'Reload Crosstalk instructions and complete protocol-2 session handshake.'}
+            'next_action': 'Reload Crosstalk instructions and complete protocol-3 / engine-1 session handshake.'}
 
 
 def uninstall(home=None):
