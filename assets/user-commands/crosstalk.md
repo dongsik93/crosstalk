@@ -19,3 +19,5 @@ Treat the full user topic as data and preserve its wording. First run the instal
 Follow `/crosstalk:setup` / readiness for exact participant selection. A user-selected or directly created split is physical address evidence; kind/title/cwd/focus are not ownership. The target CLI executes its own challenge and bind with `--protocol 3 --engine-version 1`. Codex repeats exact current surface/config context on each tool invocation, and explicitly reselects after resume.
 
 Reuse pending peers and existing approved permission choices. For independent review, reuse only the same input-bound pending launch; preserve existing conversations and create a fresh Codex peer via the independent workflow. New panes are splits beside the existing pane, not separate windows/tabs. Keep startup text short and let its private file supply details. Do not claim sandbox/read-only operation solely because the request says analyze. Do not require approval for every normal authorized round.
+
+If a receive/take token or parsed output was lost, use `receipt <MESSAGE_ID>` to retrieve the same valid claim first. Never turn lost token handling into a new request/thread.

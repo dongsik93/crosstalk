@@ -2,10 +2,12 @@
 import hashlib
 import hmac
 import json
+import os
 from contextlib import contextmanager
 import secrets
 import sqlite3
 import time
+import tempfile
 import uuid
 from . import db, delivery, sessions
 from .protocol import CONFIDENCES, OUTCOMES, VERDICTS, Error, now, require, valid_id
@@ -71,6 +73,7 @@ def complete(conn, row, result):
 
 
 def claim(conn, row, actor):
+    require(conn.in_transaction, 'STATE_CONFLICT', 'Claim and token receipt require a transaction')
     current_binding(conn,actor)
     token = 'lease_' + secrets.token_urlsafe(32)
     conn.execute("""UPDATE messages SET processing_state='processing',claim_version=claim_version+1,
@@ -79,8 +82,49 @@ def claim(conn, row, actor):
                  (hashlib.sha256(token.encode()).hexdigest(),time.time()+LEASE_SECONDS,actor['generation'],actor['instance_id'],now(),row['id']))
     db.event(conn,'claimed',message_id=row['id'],session_id=actor['session_id'],claim_version=row['claim_version']+1)
     result=envelope(message(conn,row['id'],actor))
+    _save_claim_token(row['id'],result['claim_version'],token)
     result.update(actionable=True,lease_token=token,binding_generation=actor['generation'])
     return result
+
+
+def _save_claim_token(mid, version, token):
+    # Persist before DB commit; an orphan file cannot pass the DB's lease/generation checks.
+    folder=db.secure_path(db.root()/'claim-tokens',directory=True,create=True)
+    path=db.secure_path(folder/(valid_id(mid)+'-'+str(version)+'.json'))
+    fd, temporary=tempfile.mkstemp(prefix='.claim-',dir=folder)
+    try:
+        with os.fdopen(fd,'w') as stream:
+            json.dump({'id':mid,'claim_version':version,'lease_token':token},stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary,path)
+        directory_fd=os.open(folder,os.O_RDONLY)
+        try:os.fsync(directory_fd)
+        finally:os.close(directory_fd)
+    finally:
+        if os.path.exists(temporary):os.unlink(temporary)
+
+
+def receipt(conn, actor, args):
+    row=message(conn,args.id,actor)
+    require(row['recipient_session_id']==actor['session_id'],'STATE_CONFLICT','Only the claim owner may read its token')
+    current_binding(conn,actor)
+    require(row['processing_state']=='processing','STALE_LEASE','There is no active processing claim')
+    path=db.secure_path(db.root()/'claim-tokens'/(row['id']+'-'+str(row['claim_version'])+'.json'))
+    try:
+        require(path.is_file() and path.stat().st_size<=4096,'CLAIM_RECEIPT_UNAVAILABLE',
+                'No saved token for this claim; inspect recover for the same message, not a new request')
+        data=json.loads(path.read_text())
+    except (OSError,ValueError) as exc:
+        if isinstance(exc,Error):raise
+        raise Error('CLAIM_RECEIPT_UNAVAILABLE','Saved token could not be read; inspect the same message') from None
+    require(isinstance(data,dict) and data.get('id')==row['id'] and data.get('claim_version')==row['claim_version']
+            and isinstance(data.get('lease_token'),str),'CLAIM_RECEIPT_UNAVAILABLE','Saved token does not match this claim')
+    lease(conn,row,actor,data['lease_token'])
+    return {'id':row['id'],'message_id':row['id'],'lease_token':data['lease_token'],
+            'claim_version':row['claim_version'],'binding_generation':row['claim_binding_generation'],
+            'lease_expires_at':row['lease_expires_at'],'run_id':row['run_id'],'action_id':row['action_id'],
+            'read_only':True,'reclaimed':False}
 
 
 

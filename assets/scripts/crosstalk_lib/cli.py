@@ -64,6 +64,7 @@ def parser():
     cancel.add_argument('id')
     cancel.add_argument('--reason',required=True)
     commands.add_parser('retry').add_argument('id')
+    commands.add_parser('receipt',help='Read the same valid claim token without reclaiming or repeating work').add_argument('id')
     for name in ('history','status'):
         sub=commands.add_parser(name)
         sub.add_argument('id',**({'nargs':'?'} if name=='status' else {}))
@@ -99,7 +100,7 @@ def capabilities():
             'independent_instructions':str(script_root.parent/'codex-skills/crosstalk/independent.md'),
             'discussion_instructions':str(script_root.parent/'codex-skills/crosstalk/discussion.md'),
             'supported_schema_version':SCHEMA_VERSION,'backend':'ghostty','installation_health':health,
-            'mailbox_instructions':str(instructions),'supported_commands':['input','run','capabilities','migrate','session','send','receive','reply','ack','renew','retry','recover','cancel','status','history','doctor','review','install','uninstall']}
+            'mailbox_instructions':str(instructions),'supported_commands':['input','run','capabilities','migrate','session','send','receive','receipt','reply','ack','renew','retry','recover','cancel','status','history','doctor','review','install','uninstall']}
 
 
 def maintenance():
@@ -123,7 +124,7 @@ def dispatch(args):
     if args.command=='input':
         from . import intake
         return intake.run(args)
-    readonly=(args.command=='run' and args.run_command in ('next','status','report','export')) or args.command in ('status','history') or (args.command=='recover' and not args.reclaim) or (args.command=='session' and args.session_command=='status')
+    readonly=(args.command=='run' and args.run_command in ('next','status','report','export')) or args.command in ('status','history','receipt') or (args.command=='recover' and not args.reclaim) or (args.command=='session' and args.session_command=='status')
     if not readonly: maintenance()
     if args.command=='run':
         from .engine import service

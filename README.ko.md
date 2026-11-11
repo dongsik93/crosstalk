@@ -3,7 +3,7 @@
 [English](README.md) | [한국어](README.ko.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.12.2--dev-blue)
+![Version](https://img.shields.io/badge/version-0.12.3--dev-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-black)
 
@@ -454,3 +454,5 @@ PR 리뷰는 `/crosstalk:review <PR>`로 실행합니다. Deep review는 base/he
 ## 라이선스
 
 Crosstalk은 [MIT 라이선스](LICENSE)로 배포합니다.
+
+분실한 수신 토큰은 `crosstalk receipt <MESSAGE_ID>`로 같은 유효 claim에서 다시 읽을 수 있습니다. 새 요청으로 우회하지 않습니다. 이전 버전에서 이미 유실된 토큰은 같은 메시지의 recover 절차가 필요합니다.

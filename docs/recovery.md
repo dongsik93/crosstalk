@@ -57,3 +57,7 @@ Inspect `run status <RUN_ID>`, `run next <RUN_ID>` and an explicit `run report <
 `run continue` does not reclaim expired leases, `recover` does not release workflow pause, and `retry` only resubmits a notification. Managed raw reply/ack/send returns `RUN_MANAGED_BY_ENGINE`; it is not a reason to remove the guard. Completed ask replies are informational and need no fake read/ack to finish the run.
 
 For schema 3 use [v0.12 upgrade guidance](upgrade-v0.12.md). Preserve existing thread ownership and protocol-3/engine-1 readiness for new runs. Same-user direct DB access or viewing neighboring panes remains outside the API disclosure barrier.
+
+## Lost token without a lost claim
+
+Use `crosstalk receipt <MESSAGE_ID>` to read the same valid owner-bound token. This is read-only and does not reexecute work, renew the lease or increment attempts. Do not create a replacement request. Token files are mode 0600 under the private `claim-tokens` directory and contain no message bodies. They are persisted before the claim transaction commits; persistence failure rolls back the claim, and orphaned/stale files cannot authorize a different DB claim. Expired/completed/cancelled/rebound claims cannot return usable tokens. Older claims without a saved receipt still require normal same-message recovery.

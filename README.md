@@ -3,7 +3,7 @@
 English | [한국어](README.ko.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.12.2--dev-blue)
+![Version](https://img.shields.io/badge/version-0.12.3--dev-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-black)
 
@@ -452,3 +452,5 @@ Issues and pull requests are welcome. Good first contributions include:
 ## License
 
 Crosstalk is released under the [MIT License](LICENSE).
+
+A lost token can be read with `crosstalk receipt <MESSAGE_ID>` for the same valid claim; never replace the request. Claims made before token persistence still need same-message recovery.

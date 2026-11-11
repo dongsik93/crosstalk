@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.12.3 — unreleased
+
+- Persist private claim-token receipts before DB commit and add read-only `receipt ID` retrieval for the same valid claim. Expiry, completion, rebind and generation checks remain enforced.
+- Treat lost tokens/output as same-message continuation, never a replacement request. Older claims without receipts retain explicit recovery requirements.
+
+
 ## 0.12.2
 
 - Bind capture to native hook `prompt_id` and transcript `promptId`; use body hashes only to verify content. Repeated text cannot select a past or future turn. Unstarted older captures require a new request.

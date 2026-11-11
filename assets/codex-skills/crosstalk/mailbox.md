@@ -91,3 +91,11 @@ Show a faithful summary and the actual received body with participant roles. Kee
 ## New-peer permissions
 
 Keep existing CLI permission settings by default. Apply `ensure-peer <caller> <peer> --auto-approve` only when the user explicitly selects it for that launch; Codex maps this to `--yolo`, Claude/agy to `--dangerously-skip-permissions`. The setting affects all tools, and Codex YOLO also disables its sandbox. Never infer approval from timeout, save it globally, or change an existing peer's permissions. Reuse prior explicit authorization without asking again. Unknown permissions remain unknown; an analyze request is not proof of a read-only sandbox.
+
+## Lost token or failed output parsing
+
+The runtime now saves claim tokens privately before committing the claim. If a tool response or shell variable was lost, run `crosstalk receipt <MESSAGE_ID>` first. This reads the **same current token**, without a new claim, attempt or round, and needs no reclaim approval. Use it to continue the original work; do not repeat external actions already performed. For engine actions, resume `run take <ACTION_ID> --lease-token <RETURNED_TOKEN>`.
+
+Never send a new request or abandon a processing reply merely because its token was lost. If receipt reports expiry, stale binding or no saved receipt (including claims from older versions), inspect `recover` for that **same message** and follow its explicit recovery policy. Do not claim that no external side effects occurred without checking.
+
+Save command stdout directly to a private file before parsing: `umask 077; "$CT" receive > "$PRIVATE_REPLY_FILE"`, then `jq ... "$PRIVATE_REPLY_FILE"` or Python JSON loading. Do not pass JSON through `echo`, which may interpret escaped characters. Never print tokens in normal conversation or diagnostics. Token receipts are private state, not logs; the DB still validates ownership, expiry and claim generation on every read/use.
